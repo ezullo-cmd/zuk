@@ -181,6 +181,16 @@ function situazioneCompleta(persona, percorsi, pagamenti, oggi = oggiISO()) {
     legacy.prossimaScadenza
   ].filter(Boolean).sort();
   const attuale = perc.find((p) => p.stato === 'in_corso') || perc.find((p) => p.stato === 'futuro') || perc[0] || null;
+  // stato complessivo della persona rispetto ai percorsi
+  const haFuturo = perc.some((p) => p.stato === 'futuro');
+  const inCorso = perc.find((p) => p.stato === 'in_corso');
+  const abbonamentoAttivo = FREQUENZE[persona.tipo_pagamento] > 0 && (!persona.data_fine || persona.data_fine >= oggi);
+  let statoPercorso;
+  if (persona.stato === 'cessato') statoPercorso = 'terminato';
+  else if (inCorso || haFuturo || abbonamentoAttivo) statoPercorso = 'attivo';
+  else if (perc.length) statoPercorso = 'terminato';
+  else statoPercorso = 'nessuno';
+  const daRinnovare = statoPercorso === 'attivo' && !!inCorso && !haFuturo && inCorso.giorniAllaFine <= 30;
   return {
     percorsi: perc,
     legacy,
@@ -190,7 +200,12 @@ function situazioneCompleta(persona, percorsi, pagamenti, oggi = oggiISO()) {
     ricevuteMancanti: ratePerc.filter((r) => r.ricevuta_mancante).length + legacy.ricevuteMancanti,
     percorsoAttuale: attuale && {
       id: attuale.id, tipo: attuale.tipo, fine: attuale.fine, stato: attuale.stato, giorniAllaFine: attuale.giorniAllaFine
-    }
+    },
+    statoPercorso,
+    daRinnovare,
+    numPercorsi: perc.length,
+    numRinnovi: perc.filter((p) => p.rinnovo_di).length,
+    ultimaFine: perc.length ? perc.map((p) => p.fine).sort().pop() : null
   };
 }
 
@@ -405,7 +420,9 @@ function validaPercorso(d) {
   if (!(Number(d.durata_mesi) > 0)) throw new Error('Indica la durata del percorso');
   const n = d.modalita === 'rate' ? Number(d.numero_rate) : 1;
   if (!(n >= 1 && n <= 36)) throw new Error('Numero di rate non valido');
-  return { ...d, durata_mesi: Number(d.durata_mesi), numero_rate: n };
+  const out = { ...d, durata_mesi: Number(d.durata_mesi), numero_rate: n };
+  if (!out.rinnovo_di) delete out.rinnovo_di; // in modifica non si tocca il collegamento al percorso precedente
+  return out;
 }
 
 async function salvaPercorso(clienteId, id, data) {

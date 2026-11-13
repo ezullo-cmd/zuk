@@ -125,29 +125,48 @@ function editPercorso(cliente, persona, percorso, onDone, precedente) {
     const f = new Date(precedente.fine + 'T00:00:00');
     f.setDate(f.getDate() + 1);
     const inizio = `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, '0')}-${String(f.getDate()).padStart(2, '0')}`;
-    values = { ...precedente, id: undefined, data_inizio: inizio > oggiISO() ? inizio : oggiISO(), durata_mesi: String(precedente.durata_mesi), numero_rate: String(precedente.numero_rate) };
+    values = {
+      tipo: precedente.tipo, importo_totale: precedente.importo_totale, modalita: precedente.modalita,
+      data_inizio: inizio > oggiISO() ? inizio : oggiISO(), durata_mesi: String(precedente.durata_mesi),
+      numero_rate: String(Math.max(precedente.numero_rate, 2)), note: ''
+    };
   } else values = { tipo: 'personal', data_inizio: oggiISO(), durata_mesi: '3', modalita: 'unica', numero_rate: '3' };
+  const fields = [...percorsoFields(), { name: 'note', label: 'Note', type: 'textarea' }];
+  if (precedente) {
+    fields[0] = { ...fields[0], label: 'Cosa rinnova' };
+    fields.unshift({ name: 'info_rinnovo', type: 'html' });
+  }
   openForm({
-    title: percorso ? 'Modifica percorso' : precedente ? 'Rinnovo percorso' : 'Nuovo percorso',
-    fields: [...percorsoFields(), { name: 'note', label: 'Note', type: 'textarea' }],
+    title: percorso ? 'Modifica percorso' : precedente ? `Rinnovo · ${persona.nome} ${persona.cognome}` : 'Nuovo percorso',
+    fields,
     values,
-    onInput: (v) => { $('#anteprima').innerHTML = anteprimaRate(v); },
+    onInput: (v) => {
+      $('#anteprima').innerHTML = anteprimaRate(v);
+      if (precedente)
+        $('#info_rinnovo').innerHTML = `<div class="rinnovo-info"><span class="muted">Percorso precedente</span>
+          <strong>${esc(label(TIPI_PERCORSO, precedente.tipo))}</strong> · ${precedente.durata_mesi} ${precedente.durata_mesi === 1 ? 'mese' : 'mesi'}
+          · dal ${fmtDate(precedente.data_inizio)} al ${fmtDate(precedente.fine)}
+          · ${precedente.importo_totale !== null ? eur(precedente.importo_totale) : '—'} ${precedente.modalita === 'rate' ? `in ${precedente.numero_rate} rate` : 'in unica soluzione'}</div>`;
+    },
     onSubmit: async (d) => {
-      await api.percorsi.save(cliente.id, percorso?.id, { ...percorsoDaForm(d), note: d.note, persona_id: persona.id });
-      toast(percorso ? 'Percorso aggiornato' : 'Percorso creato');
+      await api.percorsi.save(cliente.id, percorso?.id, {
+        ...percorsoDaForm(d), note: d.note, persona_id: persona.id, ...(precedente ? { rinnovo_di: precedente.id } : {})
+      });
+      toast(percorso ? 'Percorso aggiornato' : precedente ? 'Rinnovo registrato' : 'Percorso creato');
       onDone();
     }
   });
 }
 
-function badgePercorso(pa) {
+function badgePercorso(pa, sit) {
   if (!pa) return '<span class="muted">Nessun percorso</span>';
+  const rinnovi = sit?.numRinnovi ? ` <span class="badge rinnovo" title="Rinnovi effettuati">↻ ${sit.numRinnovi === 1 ? 'Rinnovato' : `Rinnovato ${sit.numRinnovi} volte`}</span>` : '';
   let extra = '';
-  if (pa.stato === 'in_corso' && pa.giorniAllaFine <= 14)
-    extra = ` <span class="badge warn">${pa.giorniAllaFine <= 0 ? 'Termina oggi' : `Termina tra ${pa.giorniAllaFine} gg`}</span>`;
+  if (sit?.daRinnovare)
+    extra = ` <span class="badge warn">Da rinnovare · ${pa.giorniAllaFine <= 0 ? 'termina oggi' : `termina tra ${pa.giorniAllaFine} gg`}</span>`;
   else if (pa.stato === 'concluso') extra = ' <span class="badge annullata">Concluso</span>';
   else if (pa.stato === 'futuro') extra = ' <span class="badge annullata">Da iniziare</span>';
-  return `${esc(label(TIPI_PERCORSO, pa.tipo))}<div class="muted small">fino al ${fmtDate(pa.fine)}${extra}</div>`;
+  return `${esc(label(TIPI_PERCORSO, pa.tipo))}${rinnovi}<div class="muted small">fino al ${fmtDate(pa.fine)}${extra}</div>`;
 }
 
 /** Etichetta del periodo coperto da una rata: "novembre 2026" o "ottobre – dicembre 2026". */
@@ -173,6 +192,15 @@ const fileDaInput = async (file) =>
 
 // ---------- Elenco ------------------------------------------------------------
 let filtroPersone = { testo: '', vista: 'attivi' };
+
+const FILTRI_PERSONE = {
+  attivi: (p) => p.situazione.statoPercorso === 'attivo',
+  da_rinnovare: (p) => p.situazione.daRinnovare,
+  terminati: (p) => p.situazione.statoPercorso === 'terminato',
+  rinnovati: (p) => p.situazione.numRinnovi > 0,
+  ritardo: (p) => p.situazione.inRitardo.length > 0,
+  tutti: () => true
+};
 let cercaTimer;
 
 async function renderElencoPersone(cliente, el) {
@@ -180,21 +208,31 @@ async function renderElencoPersone(cliente, el) {
   const q = filtroPersone.testo.toLowerCase();
   const lista = persone.filter((p) => {
     if (q && !`${p.nome} ${p.cognome} ${p.telefono || ''} ${p.email || ''}`.toLowerCase().includes(q)) return false;
-    if (filtroPersone.vista === 'attivi') return p.stato !== 'cessato';
-    if (filtroPersone.vista === 'ritardo') return p.situazione.inRitardo.length > 0;
-    if (filtroPersone.vista === 'cessati') return p.stato === 'cessato';
-    return true;
+    return FILTRI_PERSONE[filtroPersone.vista](p);
   });
-  const nRitardo = persone.filter((p) => p.situazione.inRitardo.length).length;
+  const conta = Object.fromEntries(Object.entries(FILTRI_PERSONE).map(([k, f]) => [k, persone.filter(f).length]));
+  const nRitardo = conta.ritardo;
+  const conPercorso = persone.filter((p) => p.situazione.numPercorsi).length;
+  const tasso = conPercorso ? Math.round((conta.rinnovati / conPercorso) * 100) : 0;
 
   el.innerHTML = `
+    <div class="cards cards-filter">
+      ${[
+        ['attivi', 'Attivi', 'percorso in corso'],
+        ['da_rinnovare', 'Da rinnovare', 'terminano entro 30 giorni'],
+        ['terminati', 'Terminati', 'non hanno rinnovato'],
+        ['rinnovati', 'Rinnovati', `${tasso}% di chi ha fatto un percorso`],
+        ['ritardo', 'In ritardo', 'rate non pagate'],
+        ['tutti', 'Tutti', 'in anagrafica']
+      ]
+        .map(
+          ([k, l, sub]) => `<button class="card card-btn ${filtroPersone.vista === k ? 'selected' : ''} ${k === 'ritardo' && nRitardo ? 'card-alert' : ''} ${k === 'da_rinnovare' && conta[k] ? 'card-warn' : ''}" data-vista="${k}">
+            <div class="label">${l}</div><div class="value">${conta[k]}</div><div class="muted">${sub}</div></button>`
+        )
+        .join('')}
+    </div>
     <div class="toolbar">
       <input id="f-persone" class="search-input" placeholder="Cerca per nome, telefono, email…" value="${esc(filtroPersone.testo)}">
-      <div class="segmented">
-        ${[['attivi', 'Attivi'], ['ritardo', `In ritardo${nRitardo ? ` (${nRitardo})` : ''}`], ['cessati', 'Cessati'], ['tutti', 'Tutti']]
-          .map(([k, l]) => `<button class="${filtroPersone.vista === k ? 'active' : ''} ${k === 'ritardo' && nRitardo ? 'alert' : ''}" data-vista="${k}">${l}</button>`)
-          .join('')}
-      </div>
       <div class="spacer"></div>
       <button class="btn primary" id="btn-add-persona">＋ Nuova persona</button>
     </div>
@@ -209,7 +247,7 @@ async function renderElencoPersone(cliente, el) {
                     ${p.stato !== 'attivo' ? ` <span class="badge annullata">${esc(label(STATI_PERSONA, p.stato))}</span>` : ''}
                     ${p.situazione.certificatoScaduto ? ' <span class="badge late" title="Certificato medico scaduto">Certificato scaduto</span>' : ''}</td>
                   <td>${esc(p.telefono)}</td>
-                  <td>${p.situazione.percorsoAttuale || !MESI_TIPO[p.tipo_pagamento] ? badgePercorso(p.situazione.percorsoAttuale) : `${esc(tipoBreve(p.tipo_pagamento))}${p.importo ? ` · ${eur(p.importo)}` : ''}`}</td>
+                  <td>${p.situazione.percorsoAttuale || !MESI_TIPO[p.tipo_pagamento] ? badgePercorso(p.situazione.percorsoAttuale, p.situazione) : `${esc(tipoBreve(p.tipo_pagamento))}${p.importo ? ` · ${eur(p.importo)}` : ''}`}</td>
                   <td>${badgePagamenti(p.situazione)}${p.situazione.ricevuteMancanti ? ` <span class="badge warn" title="Pagamenti senza fattura">${p.situazione.ricevuteMancanti} senza fattura</span>` : ''}</td>
                   <td>${p.situazione.ultimoAppuntamento ? fmtDate(p.situazione.ultimoAppuntamento) : '<span class="muted">—</span>'}</td>
                   <td>${p.situazione.prossimoAppuntamento ? fmtDateTime(p.situazione.prossimoAppuntamento) : '<span class="muted">—</span>'}</td>
@@ -277,6 +315,7 @@ async function renderPersona(cliente, el, personaId) {
         </div>
       </div>
       <div class="btn-row">
+        ${s.percorsi.length ? '<button class="btn primary" id="btn-rinnovo-top">↻ Rinnovo</button>' : ''}
         <button class="btn" id="btn-edit-persona">Modifica dati</button>
         <button class="btn danger" id="btn-del-persona">Elimina</button>
       </div>
@@ -311,7 +350,8 @@ async function renderPersona(cliente, el, personaId) {
                   <div class="percorso-head">
                     <div>
                       <strong>${esc(label(TIPI_PERCORSO, pc.tipo))}</strong> ${STATI_PERCORSO[pc.stato]}
-                      ${pc.stato === 'in_corso' && pc.giorniAllaFine <= 14 ? `<span class="badge warn">Termina tra ${Math.max(pc.giorniAllaFine, 0)} gg</span>` : ''}
+                      ${pc.rinnovo_di ? '<span class="badge rinnovo">↻ Rinnovo</span>' : ''}
+                      ${pc.stato === 'in_corso' && pc.giorniAllaFine <= 30 && !s.percorsi.some((x) => x.stato === 'futuro') ? `<span class="badge warn">Da rinnovare · termina tra ${Math.max(pc.giorniAllaFine, 0)} gg</span>` : ''}
                       <div class="muted small">
                         ${pc.durata_mesi === 1 ? '1 mese' : `${pc.durata_mesi} mesi`} · dal ${fmtDate(pc.data_inizio)} al ${fmtDate(pc.fine)}
                         · ${pc.importo_totale !== null ? eur(pc.importo_totale) : '—'} ${pc.modalita === 'rate' ? `in ${pc.numero_rate} rate` : 'in unica soluzione'}
@@ -372,7 +412,9 @@ async function renderPersona(cliente, el, personaId) {
   $('#btn-add-app-p').onclick = () => editAppuntamento(cliente, null, { personaId: p.id, onDone: refresh });
   $('#btn-extra').onclick = () => registraPagamento(cliente, p, null, refresh);
   $('#btn-new-percorso').onclick = () => editPercorso(cliente, p, null, refresh);
-  if ($('#btn-rinnovo')) $('#btn-rinnovo').onclick = () => editPercorso(cliente, p, null, refresh, s.percorsi[0]);
+  const rinnova = () => editPercorso(cliente, p, null, refresh, s.percorsi[0]);
+  if ($('#btn-rinnovo')) $('#btn-rinnovo').onclick = rinnova;
+  if ($('#btn-rinnovo-top')) $('#btn-rinnovo-top').onclick = rinnova;
   el.querySelectorAll('[data-perc-edit]').forEach(
     (b) => (b.onclick = () => editPercorso(cliente, p, s.percorsi.find((x) => x.id === Number(b.dataset.percEdit)), refresh))
   );

@@ -188,7 +188,9 @@ const CLIENT_MIGRATIONS = [
    ALTER TABLE pagamenti ADD COLUMN percorso_id INT REFERENCES percorsi(id) ON DELETE CASCADE;
    ALTER TABLE pagamenti ADD COLUMN numero_rata INT;
    ALTER TABLE pagamenti ADD CONSTRAINT pagamenti_rata_unica UNIQUE (percorso_id, numero_rata);
-   ALTER TABLE persone ALTER COLUMN tipo_pagamento SET DEFAULT 'percorso';`
+   ALTER TABLE persone ALTER COLUMN tipo_pagamento SET DEFAULT 'percorso';`,
+  // v4: un percorso può essere il rinnovo di un percorso precedente
+  `ALTER TABLE percorsi ADD COLUMN rinnovo_di INT REFERENCES percorsi(id) ON DELETE SET NULL;`
 ];
 
 async function migrate(pool, migrations) {
@@ -342,7 +344,7 @@ const TABLES = {
     order: 'periodo DESC NULLS LAST, pagato_il DESC'
   },
   percorsi: {
-    fields: ['persona_id', 'tipo', 'data_inizio', 'durata_mesi', 'importo_totale', 'modalita', 'numero_rate', 'note'],
+    fields: ['persona_id', 'tipo', 'data_inizio', 'durata_mesi', 'importo_totale', 'modalita', 'numero_rate', 'note', 'rinnovo_di'],
     order: 'data_inizio DESC'
   }
 };
