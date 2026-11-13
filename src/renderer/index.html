@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>Zuk Gestionale</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="update-banner" class="update-banner hidden"></div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">Zuk <span>Gestionale</span></div>
+      <nav>
+        <a href="#" data-route="home" class="nav-item">🏠 Home</a>
+        <div class="nav-section">
+          <span>Clienti</span>
+          <button id="btn-new-cliente" class="icon-btn" title="Nuovo cliente">＋</button>
+        </div>
+        <input id="search-clienti" class="search" placeholder="Cerca cliente…">
+        <div id="clienti-menu" class="clienti-menu"></div>
+      </nav>
+      <div class="sidebar-footer">
+        <a href="#" data-route="settings" class="nav-item">⚙️ Impostazioni</a>
+        <div class="version">v<span id="app-version">—</span></div>
+      </div>
+    </aside>
+
+    <main id="content" class="content"></main>
+  </div>
+
+  <dialog id="modal">
+    <form id="modal-form" method="dialog">
+      <h2 id="modal-title"></h2>
+      <div id="modal-body" class="form-grid"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="modal-cancel">Annulla</button>
+        <button type="submit" class="btn primary">Salva</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="app.js"></script>
+</body>
+</html>
