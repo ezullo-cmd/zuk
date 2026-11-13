@@ -76,10 +76,19 @@ const SEZIONI = [
   ['pagamenti', 'Pagamenti e rate'], ['fatture', 'Fatturazione'], ['acquisti', 'Acquisti']
 ];
 
-const testoSu = (hex) => {
-  const n = parseInt(String(hex || '#2f6fed').slice(1), 16);
-  return 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) > 170 ? '#1d2330' : '#ffffff';
-};
+// il colore del cliente si usa solo per le scritte: se è troppo scuro per lo sfondo nero lo si schiarisce
+function coloreLeggibile(hex) {
+  const n = parseInt(String(hex || '#e8eaed').replace('#', ''), 16);
+  if (Number.isNaN(n)) return '#e8eaed';
+  let rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const lum = ([r, g, b]) => {
+    const f = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  };
+  const sfondo = lum([10, 11, 13]);
+  for (let i = 0; i < 20 && (lum(rgb) + 0.05) / (sfondo + 0.05) < 6; i++) rgb = rgb.map((c) => Math.round(c + (255 - c) * 0.12));
+  return '#' + rgb.map((c) => c.toString(16).padStart(2, '0')).join('');
+}
 
 async function avvia(primoAvvio = false) {
   silenzioso = primoAvvio;
@@ -90,8 +99,7 @@ async function avvia(primoAvvio = false) {
   } finally {
     silenzioso = false;
   }
-  document.documentElement.style.setProperty('--cliente', cliente.colore || '#2f6fed');
-  document.documentElement.style.setProperty('--on-cliente', testoSu(cliente.colore));
+  document.documentElement.style.setProperty('--cliente', coloreLeggibile(cliente.colore));
   $('#cliente-nome').textContent = cliente.nome;
   const logo = $('#cliente-logo');
   if (cliente.logo) {
@@ -100,7 +108,10 @@ async function avvia(primoAvvio = false) {
     img.src = cliente.logo;
     img.alt = '';
     logo.appendChild(img);
-  } else logo.textContent = cliente.nome.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  } else {
+    logo.classList.add('iniziali');
+    logo.textContent = cliente.nome.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  }
   document.title = `${cliente.nome} · Area clienti`;
   $('#login').classList.add('hidden');
   $('#app').classList.remove('hidden');
@@ -148,7 +159,7 @@ VISTE.home = async () => {
       <div class="card"><div class="label">Incassato questo mese</div><div class="value">${eur(d.rate.incassatoMese.importo)}</div><div class="sub">${d.rate.incassatoMese.n} rate</div></div>
     </div>`;
     if (d.ritardi.length)
-      html += `<div class="panel alert"><h3>⚠️ Rate in ritardo</h3><div class="list">${d.ritardi
+      html += `<div class="panel alert"><h3><span class="ic ic-alert"></span>Rate in ritardo</h3><div class="list">${d.ritardi
         .map((r) => `<div class="row click" data-persona="${r.persona.id}"><div class="grow"><strong>${esc(r.persona.cognome)} ${esc(r.persona.nome)}</strong>
           <div class="muted small">${esc(etichettaRata(r))} · scaduta il ${data(r.scadenza)}</div></div><div class="right late-text">${eur(r.importo)}</div></div>`)
         .join('')}</div></div>`;
@@ -179,7 +190,7 @@ const FILTRI = {
 let filtroP = { f: 'attivi', q: '' };
 
 function badgeRate(s) {
-  if (s.inRitardo.length) return `<span class="badge b-late">⚠ ${s.inRitardo.length} in ritardo · ${eur(s.importoInRitardo)}</span>`;
+  if (s.inRitardo.length) return `<span class="badge b-late">${s.inRitardo.length} in ritardo · ${eur(s.importoInRitardo)}</span>`;
   if (s.prossimaScadenza) return `<span class="badge b-warn">da pagare entro il ${data(s.prossimaScadenza)}</span>`;
   return '<span class="badge b-ok">in regola</span>';
 }
@@ -224,7 +235,7 @@ const STATO_RATA = {
   pagata: '<span class="badge b-ok">Pagata</span>',
   esente: '<span class="badge b-grey">Non dovuta</span>',
   da_pagare: '<span class="badge b-warn">Da pagare</span>',
-  in_ritardo: '<span class="badge b-late">⚠ In ritardo</span>'
+  in_ritardo: '<span class="badge b-late">In ritardo</span>'
 };
 
 function righeRate(rate) {
@@ -232,7 +243,7 @@ function righeRate(rate) {
   return `<div class="list">${rate
     .map((r) => `<div class="row ${r.stato === 'in_ritardo' ? 'late' : ''}"><div class="grow"><strong>${esc(etichettaRata(r))}</strong>
       <div class="muted small">${r.scadenza ? `scadenza ${data(r.scadenza)}` : ''}${r.pagamento && !r.pagamento.esente ? ` · pagata il ${data(r.pagamento.pagato_il)}` : ''}</div>
-      ${r.pagamento?.documento_id ? `<a class="small" href="/api/documento?id=${r.pagamento.documento_id}" target="_blank" rel="noopener">📄 Contabile</a>` : ''}</div>
+      ${r.pagamento?.documento_id ? `<a class="small" href="/api/documento?id=${r.pagamento.documento_id}" target="_blank" rel="noopener"><span class="ic ic-file"></span> Contabile</a>` : ''}</div>
       <div class="right">${r.importo !== null && r.importo !== undefined ? `<div>${eur(r.importo)}</div>` : ''}${STATO_RATA[r.stato] || ''}</div></div>`)
     .join('')}</div>`;
 }
@@ -347,7 +358,7 @@ VISTE.pagamenti = async () => {
               <div class="grow"><strong class="click" data-persona="${r.persona.id}">${esc(r.persona.cognome)} ${esc(r.persona.nome)}</strong>
                 <div class="muted small">${esc(etichettaRata(r))}${r.tipo_percorso ? ' · ' + esc(TIPI[r.tipo_percorso] || r.tipo_percorso) : ''}${r.scadenza ? ' · scad. ' + data(r.scadenza) : ''}
                   ${r.pagamento && !r.pagamento.esente ? ' · pagata il ' + data(r.pagamento.pagato_il) : ''}</div>
-                ${r.pagamento?.documento_id ? `<a class="small" href="/api/documento?id=${r.pagamento.documento_id}" target="_blank" rel="noopener">📄 Contabile</a>` : ''}</div>
+                ${r.pagamento?.documento_id ? `<a class="small" href="/api/documento?id=${r.pagamento.documento_id}" target="_blank" rel="noopener"><span class="ic ic-file"></span> Contabile</a>` : ''}</div>
               <div class="right">${r.importo !== null && r.importo !== undefined ? `<div>${eur(r.importo)}</div>` : ''}${STATO_RATA[r.stato] || ''}</div></div>`).join('')
           : '<div class="muted">Nessuna rata.</div>'
       }</div>${l.length ? `<div class="totale">Totale ${eur(somma(l))}</div>` : ''}</div>`;

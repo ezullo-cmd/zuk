@@ -70,7 +70,7 @@ const PERSONA_FIELDS = [
 const percorsoFields = (px = '', tipiCliente = []) => [
   {
     name: px + 'tipo', label: 'Tipo di percorso', type: 'select', full: true,
-    options: [...TIPI_PERCORSO, ...tipiCliente.map((t) => [t, t]), [ALTRO_TIPO, '✏️ Altro… (scrivi un nuovo tipo)']]
+    options: [...TIPI_PERCORSO, ...tipiCliente.map((t) => [t, t]), [ALTRO_TIPO, '+ Altro… (scrivi un nuovo tipo)']]
   },
   { name: px + 'tipo_altro', label: 'Nuovo tipo di percorso', full: true, required: true, showIf: { field: px + 'tipo', value: ALTRO_TIPO } },
   { name: px + 'data_inizio', label: 'Inizio del percorso', type: 'date', required: true },
@@ -317,7 +317,7 @@ function periodoLabel(r) {
 
 function badgePagamenti(s) {
   if (s.inRitardo.length)
-    return `<span class="badge late">⚠ ${s.inRitardo.length} ${s.inRitardo.length === 1 ? 'rata' : 'rate'} in ritardo · ${eur(s.importoInRitardo)}</span>`;
+    return `<span class="badge late">${s.inRitardo.length} ${s.inRitardo.length === 1 ? 'rata' : 'rate'} in ritardo · ${eur(s.importoInRitardo)}</span>`;
   if (s.prossimaScadenza) return `<span class="badge da_pagare">Da pagare entro il ${fmtDate(s.prossimaScadenza)}</span>`;
   return '<span class="badge pagata">In regola</span>';
 }
@@ -369,7 +369,7 @@ async function renderElencoPersone(cliente, el) {
     <div class="toolbar">
       <input id="f-persone" class="search-input" placeholder="Cerca per nome, telefono, email…" value="${esc(filtroPersone.testo)}">
       <div class="spacer"></div>
-      <button class="btn" id="btn-tipi-percorso">⚙ Tipi di percorso</button>
+      <button class="btn" id="btn-tipi-percorso"><span class="ic ic-sliders"></span> Tipi di percorso</button>
       <button class="btn primary" id="btn-add-persona">＋ Nuova persona</button>
     </div>
     <div class="table-wrap"><table class="clickable">
@@ -432,7 +432,7 @@ async function renderPersona(cliente, el, personaId) {
 
   const info = [
     ['Telefono', p.telefono], ['Email', p.email], ['Data di nascita', p.data_nascita && `${fmtDate(p.data_nascita)} (${eta(p.data_nascita)} anni)`],
-    ['Comunicazioni', p.canale_comunicazione === 'email' ? `Email · ${p.email || '⚠ manca l’indirizzo'}` : p.canale_comunicazione === 'telefono' ? `WhatsApp · ${p.telefono || '⚠ manca il numero'}` : '⚠ Canale non scelto'],
+    ['Comunicazioni', p.canale_comunicazione === 'email' ? `Email · ${p.email || 'manca l’indirizzo'}` : p.canale_comunicazione === 'telefono' ? `WhatsApp · ${p.telefono || 'manca il numero'}` : 'Canale non scelto'],
     ['Codice fiscale', p.codice_fiscale], ['Indirizzo', p.indirizzo], ['Contatto di emergenza', p.contatto_emergenza],
     ['Obiettivo', p.obiettivo], ['Livello', p.livello], ['Altezza', p.altezza_cm && `${p.altezza_cm} cm`], ['Peso iniziale', p.peso_kg && `${p.peso_kg} kg`],
     ['Certificato medico', p.certificato_scadenza && `scade il ${fmtDate(p.certificato_scadenza)}${d.certificatoScaduto ? ' — SCADUTO' : ''}`],
@@ -513,13 +513,13 @@ async function renderPersona(cliente, el, personaId) {
           ? `<h4>${MESI_TIPO[p.tipo_pagamento] ? `Abbonamento ${tipoBreve(p.tipo_pagamento).toLowerCase()}` : 'Altri pagamenti'}</h4>${tab(legacy.rate)}`
           : ''
       }
-      <div style="margin-top:10px"><button class="btn small ghost" id="btn-extra">＋ Altro pagamento</button></div>
+      <div class="mt-10"><button class="btn small ghost" id="btn-extra">＋ Altro pagamento</button></div>
     </div>
 
     <div class="panel">
       <div class="panel-head"><h3>Prossimi appuntamenti</h3></div>
       ${tabellaAppuntamenti(prossimi, { mostraPersona: false, vuoto: 'Nessun appuntamento in programma.' })}
-      <h3 style="margin-top:20px">Storico appuntamenti</h3>
+      <h3 class="mt-20">Storico appuntamenti</h3>
       ${tabellaAppuntamenti(storico, { mostraPersona: false, vuoto: 'Nessun appuntamento passato.' })}
     </div>
 
@@ -529,7 +529,7 @@ async function renderPersona(cliente, el, personaId) {
         d.documenti.length
           ? `<div class="table-wrap"><table><tbody>${d.documenti
               .map(
-                (doc) => `<tr><td>📄 <a class="link" data-doc-open="${doc.id}">${esc(doc.nome_file)}</a></td>
+                (doc) => `<tr><td><span class="ic ic-file"></span> <a class="link" data-doc-open="${doc.id}">${esc(doc.nome_file)}</a></td>
                   <td class="muted">${esc(doc.descrizione)}</td><td class="muted">${fmtDate(doc.caricato_il)}</td>
                   <td class="muted num">${Math.ceil(doc.dimensione / 1024)} KB</td>
                   <td class="row-actions"><button class="btn small danger" data-doc-del="${doc.id}">Elimina</button></td></tr>`
@@ -631,7 +631,7 @@ function tabellaRate(rate, offset = 0) {
     pagata: '<span class="badge pagata">Pagata</span>',
     esente: '<span class="badge annullata">Non dovuta</span>',
     da_pagare: '<span class="badge da_pagare">Da pagare</span>',
-    in_ritardo: '<span class="badge late">⚠ In ritardo</span>'
+    in_ritardo: '<span class="badge late">In ritardo</span>'
   };
   return `<div class="table-wrap"><table>
     <thead><tr><th>Rata</th><th>Scadenza</th><th class="num">Importo</th><th>Stato</th><th>Pagata il</th><th>Contabile</th><th></th></tr></thead>
@@ -640,7 +640,7 @@ function tabellaRate(rate, offset = 0) {
         const i = j + offset;
         const pag = r.pagamento;
         let ricevuta = '';
-        if (pag?.documento_id) ricevuta = `<a class="link" data-doc-open="${pag.documento_id}">📄 Apri</a>`;
+        if (pag?.documento_id) ricevuta = `<a class="link" data-doc-open="${pag.documento_id}"><span class="ic ic-file"></span> Apri</a>`;
         else if (r.ricevuta_mancante) ricevuta = `<button class="btn small warn-btn" data-rata-upload="${i}">Carica contabile</button>`;
         return `<tr class="${r.stato === 'in_ritardo' ? 'row-late' : ''}">
           <td><strong>${esc(periodoLabel(r))}</strong>${pag?.note ? `<div class="muted small">${esc(pag.note)}</div>` : ''}</td>

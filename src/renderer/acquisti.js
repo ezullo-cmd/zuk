@@ -20,8 +20,8 @@ function statoOrdine(o, oggi = oggiLocale()) {
 
 function badgeOrdine(st) {
   switch (st.stato) {
-    case 'consegnato': return '<span class="badge ord-ok">✓ Consegnato</span>';
-    case 'in_ritardo': return `<span class="badge ord-ritardo">⚠ In ritardo di ${st.giorni} ${st.giorni === 1 ? 'giorno' : 'giorni'}</span>`;
+    case 'consegnato': return '<span class="badge ord-ok">Consegnato</span>';
+    case 'in_ritardo': return `<span class="badge ord-ritardo">In ritardo di ${st.giorni} ${st.giorni === 1 ? 'giorno' : 'giorni'}</span>`;
     case 'in_arrivo': return `<span class="badge ord-arrivo">${st.giorni === 0 ? 'Arriva oggi' : st.giorni === 1 ? 'Arriva domani' : `Arriva tra ${st.giorni} giorni`}</span>`;
     default: return `<span class="badge ord-attesa">${st.giorni === null ? 'In attesa' : `Tra ${st.giorni} giorni`}</span>`;
   }

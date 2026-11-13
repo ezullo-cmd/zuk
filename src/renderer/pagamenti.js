@@ -90,15 +90,15 @@ SECTIONS.pagamenti = {
                     pagata: '<span class="badge pagata">Pagata</span>',
                     esente: '<span class="badge annullata">Non dovuta</span>',
                     da_pagare: `<span class="badge da_pagare">Da pagare</span>${r.scadenza ? `<div class="muted small">tra ${giorniTra(oggi, r.scadenza)} gg</div>` : ''}`,
-                    in_ritardo: `<span class="badge late">⚠ In ritardo</span><div class="late-days">${ritardoGg} ${ritardoGg === 1 ? 'giorno' : 'giorni'}</div>`
+                    in_ritardo: `<span class="badge late">In ritardo</span><div class="late-days">${ritardoGg} ${ritardoGg === 1 ? 'giorno' : 'giorni'}</div>`
                   }[r.stato];
                   const pr = promPerRata.get(chiaveRata(r));
                   if (pr && r.stato !== 'pagata' && r.stato !== 'esente')
-                    stato += `<div class="small ${pr.stato === 'errore' ? 'late-days' : 'muted'}">🔔 ${
+                    stato += `<div class="small ${pr.stato === 'errore' ? 'late-days' : 'muted'}"><span class="ic ic-bell"></span> ${
                       pr.stato === 'inviato' ? `promemoria inviato il ${fmtDate(pr.inviato_il)}` : pr.stato === 'errore' ? 'promemoria non inviato' : 'promemoria da inviare'
                     }</div>`;
                   let fattura = '';
-                  if (pag?.documento_id) fattura = `<a class="link" data-doc-open="${pag.documento_id}">📄 Apri</a>`;
+                  if (pag?.documento_id) fattura = `<a class="link" data-doc-open="${pag.documento_id}"><span class="ic ic-file"></span> Apri</a>`;
                   else if (r.ricevuta_mancante) fattura = `<button class="btn small warn-btn" data-r-upload="${i}">Carica contabile</button>`;
                   return `<tr class="${r.stato === 'in_ritardo' ? 'row-late' : ''} ${r.persona.stato === 'cessato' ? 'row-muted' : ''}">
                     <td><a class="link" data-open-persona="${r.persona.id}"><strong>${esc(r.persona.cognome)} ${esc(r.persona.nome)}</strong></a></td>
@@ -168,12 +168,12 @@ SECTIONS.pagamenti = {
 
 function pannelloPromemoria(cliente, prom) {
   if (!cliente.promemoria_attivi)
-    return `<div class="panel promemoria-panel off"><strong>🔔 Promemoria rate disattivati.</strong>
+    return `<div class="panel promemoria-panel off"><strong><span class="ic ic-bell"></span> Promemoria rate disattivati.</strong>
       <span class="muted">Attivali da “Modifica” in alto: verrà inviato un messaggio 5 giorni lavorativi prima di ogni scadenza.</span></div>`;
   const aperti = prom.filter((x) => x.stato !== 'inviato');
   const inviati = prom.filter((x) => x.stato === 'inviato').slice(0, 8);
   const riga = (x) => `<div class="prom-row ${x.stato}">
-      <div class="prom-icon">${x.canale === 'email' ? '✉️' : '💬'}</div>
+      <div class="prom-icon">${x.canale === 'email' ? '<span class="ic ic-mail"></span>' : '<span class="ic ic-chat"></span>'}</div>
       <div class="prom-body">
         <div><a class="link" data-open-persona="${x.persona_id}"><strong>${esc(x.cognome)} ${esc(x.nome)}</strong></a>
           <span class="muted">· rata in scadenza il ${fmtDate(x.scadenza)} · ${x.canale === 'email' ? 'email' : 'WhatsApp'} ${esc(x.destinatario || '')}</span></div>
@@ -190,7 +190,7 @@ function pannelloPromemoria(cliente, prom) {
     </div>`;
   return `<div class="panel promemoria-panel">
     <div class="panel-head">
-      <h3>🔔 Promemoria rate ${aperti.length ? `<span class="count-late">${aperti.length}</span>` : ''}</h3>
+      <h3><span class="ic ic-bell"></span>Promemoria rate ${aperti.length ? `<span class="count-late">${aperti.length}</span>` : ''}</h3>
       <button class="btn small" id="btn-prom-check">Controlla ora</button>
     </div>
     ${aperti.length ? aperti.map(riga).join('') : '<div class="muted">Nessun promemoria in attesa. Partono da soli 5 giorni lavorativi prima di ogni scadenza, dall\'orario impostato.</div>'}

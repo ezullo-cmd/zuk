@@ -19,14 +19,22 @@ const toLocalInput = (d) => {
   return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}T${pad(x.getHours())}:${pad(x.getMinutes())}`;
 };
 const today = () => new Date().toISOString().slice(0, 10);
-// Colori proposti per i clienti
-const PALETTE = ['#2f6fed', '#0f9d8a', '#1f9d55', '#c98a12', '#e8590c', '#d64545', '#d6336c', '#7048e8', '#495057'];
-// Testo bianco o scuro a seconda della luminosità del colore di sfondo
-const textOn = (hex) => {
-  const n = parseInt(String(hex || '#2f6fed').slice(1), 16);
-  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  return 0.299 * r + 0.587 * g + 0.114 * b > 170 ? '#1d2330' : '#ffffff';
-};
+// Colori proposti per i clienti (pensati per le scritte su sfondo scuro)
+const PALETTE = ['#7aa2ff', '#2dd4bf', '#4ade80', '#facc15', '#fb923c', '#f87171', '#f472b6', '#b197fc', '#e2e8f0'];
+
+// Il colore del cliente si usa solo per le scritte: se è troppo scuro per lo sfondo nero lo si schiarisce
+function coloreLeggibile(hex) {
+  const n = parseInt(String(hex || '#e8eaed').replace('#', ''), 16);
+  if (Number.isNaN(n)) return '#e8eaed';
+  let rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const lum = ([r, g, b]) => {
+    const f = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  };
+  const sfondo = lum([10, 11, 13]);
+  for (let i = 0; i < 20 && (lum(rgb) + 0.05) / (sfondo + 0.05) < 6; i++) rgb = rgb.map((c) => Math.round(c + (255 - c) * 0.12));
+  return '#' + rgb.map((c) => c.toString(16).padStart(2, '0')).join('');
+}
 const meseLabel = (periodo) =>
   periodo ? new Date(periodo + 'T00:00:00').toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }) : '';
 const totaleFattura = (f) => Number(f.imponibile) * (1 + Number(f.iva_perc) / 100);
@@ -207,7 +215,7 @@ function ridimensionaImmagine(file, max) {
 const logoCliente = (c, cls = '') =>
   c.logo
     ? `<span class="logo ${cls}"><img src="${esc(c.logo)}" alt=""></span>`
-    : `<span class="logo logo-iniziali ${cls}" style="background:${esc(c.colore)};color:${textOn(c.colore)}">${esc(
+    : `<span class="logo logo-iniziali ${cls}" style="--c:${coloreLeggibile(c.colore)}">${esc(
         c.nome.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('')
       )}</span>`;
 
@@ -274,7 +282,7 @@ function renderMenu() {
     ? list
         .map(
           (c) =>
-            `<a href="#" class="nav-item cliente-item ${route.name === 'cliente' && route.id === c.id ? 'active' : ''}" data-cliente="${c.id}" style="--cliente:${esc(c.colore)};--on-cliente:${textOn(c.colore)}">${logoCliente(c, 'logo-sm')}<span class="grow">${esc(c.nome)}</span>${ritardiPerCliente[c.id] ? `<span class="count-late" title="Rate in ritardo">${ritardiPerCliente[c.id]}</span>` : ''}</a>`
+            `<a href="#" class="nav-item cliente-item ${route.name === 'cliente' && route.id === c.id ? 'active' : ''}" data-cliente="${c.id}" style="--cliente:${coloreLeggibile(c.colore)}">${logoCliente(c, 'logo-sm')}<span class="grow">${esc(c.nome)}</span>${ritardiPerCliente[c.id] ? `<span class="count-late" title="Rate in ritardo">${ritardiPerCliente[c.id]}</span>` : ''}</a>`
         )
         .join('')
     : `<div class="empty">${clienti.length ? 'Nessun risultato' : 'Nessun cliente'}</div>`;
@@ -326,7 +334,7 @@ async function renderHome() {
     ${
       d.ritardi.length
         ? `<div class="panel panel-alert">
-            <h3>⚠️ Rate in ritardo</h3>
+            <h3><span class="ic ic-alert"></span>Rate in ritardo</h3>
             <div class="list-appuntamenti">
               ${d.ritardi
                 .map(
@@ -345,11 +353,11 @@ async function renderHome() {
     ${
       prom.length
         ? `<div class="panel promemoria-panel">
-            <h3>🔔 Promemoria in attesa <span class="count-late">${prom.length}</span></h3>
+            <h3><span class="ic ic-bell"></span>Promemoria in attesa <span class="count-late">${prom.length}</span></h3>
             ${prom
               .map(
                 (x) => `<div class="prom-row ${x.stato}">
-                  <div class="prom-icon">${x.canale === 'email' ? '✉️' : '💬'}</div>
+                  <div class="prom-icon">${x.canale === 'email' ? '<span class="ic ic-mail"></span>' : '<span class="ic ic-chat"></span>'}</div>
                   <div class="prom-body"><div><strong>${esc(x.cognome)} ${esc(x.nome)}</strong>
                     <span class="muted">· ${esc(x.cliente_nome)} · scadenza ${fmtDate(x.scadenza)}</span></div>
                     ${statoPromemoria(x)}</div>
@@ -363,7 +371,7 @@ async function renderHome() {
     ${
       (d.ordini || []).length
         ? `<div class="panel ${d.ordini.some((o) => o.consegna_prevista < oggiLocale()) ? 'panel-alert' : ''}">
-            <h3>📦 Ordini da ricevere</h3>
+            <h3><span class="ic ic-box"></span>Ordini da ricevere</h3>
             <div class="list-appuntamenti">${d.ordini
               .map((o) => {
                 const st = statoOrdine(o);
@@ -423,7 +431,7 @@ function eliminaCliente(cliente, onDone) {
       const a = $('#avviso');
       if (!a.innerHTML)
         a.innerHTML = `<div class="avviso-elimina">
-          <strong>⚠️ Operazione definitiva, non si può annullare.</strong>
+          <strong>Operazione definitiva, non si può annullare.</strong>
           Verranno cancellati il database del cliente con <strong>tutti i dati</strong>: anagrafica, percorsi, rate,
           pagamenti e contabili PDF, appuntamenti, fatture, acquisti, promemoria, e l'accesso al portale.
           <div class="muted small">Se vuoi solo toglierlo dal menù, usa invece “Archivia”: i dati restano e potrai ripristinarlo.</div>
@@ -515,7 +523,7 @@ async function editCliente(cliente) {
         if ($('#btn-verifica-accesso'))
           $('#btn-verifica-accesso').onclick = async () => {
             const r = await safe(() => api.portale.verifica(cliente.id, form.elements.portale_utente.value, pw.value));
-            $('#verifica-esito').innerHTML = `<div class="verifica ${r.ok ? 'ok' : 'ko'}">${r.ok ? '✅' : '⚠️'} ${esc(r.motivo)}
+            $('#verifica-esito').innerHTML = `<div class="verifica ${r.ok ? 'ok' : 'ko'}">${r.ok ? '<span class="ic ic-check"></span>' : '<span class="ic ic-alert"></span>'} ${esc(r.motivo)}
               ${r.bloccato ? ' <button type="button" class="btn small" id="btn-sblocca">Sblocca ora</button>' : ''}</div>`;
             if ($('#btn-sblocca'))
               $('#btn-sblocca').onclick = async () => {
@@ -659,8 +667,8 @@ async function renderCliente() {
   route.tab = tab;
 
   content.classList.add('cliente-page');
-  content.style.setProperty('--cliente', cliente.colore);
-  content.style.setProperty('--on-cliente', textOn(cliente.colore));
+  content.style.setProperty('--cliente', coloreLeggibile(cliente.colore));
+
 
   content.innerHTML = `
     <div class="cliente-header">
@@ -713,7 +721,7 @@ async function renderSection(cliente, table) {
   const rows = await safe(() => api.records.list(cliente.id, table));
 
   el.innerHTML = `
-    <div class="header-row" style="margin-bottom:12px">
+    <div class="header-row mb-12">
       <div class="muted">${s.footer ? s.footer(rows) : `${rows.length} ${s.label.toLowerCase()}`}</div>
       <button class="btn primary" id="btn-add">＋ ${s.nuovo}</button>
     </div>
@@ -775,7 +783,7 @@ async function renderSettings() {
   const db = cfg.db;
   content.innerHTML = `
     <h1>Impostazioni</h1>
-    <div class="subtitle">Versione ${esc(info.version)} · Database ${info.dbReady ? '🟢 connesso' : '🔴 non connesso'}</div>
+    <div class="subtitle">Versione ${esc(info.version)} · Database ${info.dbReady ? '<span class="stato-db ok">connesso</span>' : '<span class="stato-db">non connesso</span>'}</div>
     <div class="panel">
       <h3>Connessione PostgreSQL</h3>
       <p class="muted">Ogni cliente ha un database dedicato (<code>${esc(db.clientDbPrefix)}&lt;id&gt;</code>). L'elenco clienti è nel database <code>${esc(db.masterDb)}</code>. I database vengono creati automaticamente: l'utente deve avere il permesso <code>CREATEDB</code>.</p>
@@ -806,7 +814,7 @@ async function renderSettings() {
         <label>Password per le app<input name="password" type="password" placeholder="${em.haPassword ? '•••••••• (salvata, lascia vuoto per non cambiarla)' : 'xxxx xxxx xxxx xxxx'}"></label>
         <label>Orario di invio promemoria<input name="orario" type="time" value="${esc(em.orario || '12:00')}" required></label>
         <details class="full"><summary class="muted">Altro provider (non Gmail)</summary>
-          <div class="form-grid" style="margin-top:8px">
+          <div class="form-grid mt-10">
             <label>Server SMTP<input name="host" value="${esc(em.host)}"></label>
             <label>Porta<input name="port" type="number" value="${esc(em.port)}"></label>
             <label class="check full"><input type="checkbox" name="secure" ${em.secure ? 'checked' : ''}> Connessione SSL</label>
@@ -935,7 +943,7 @@ function showBanner(html) {
 api.updater.onEvent((ev) => {
   switch (ev.type) {
     case 'available':
-      showBanner(`<div>🎉 Nuova versione <strong>${esc(ev.version)}</strong> disponibile</div><button class="btn small" id="upd-download">Aggiorna</button>`);
+      showBanner(`<div>Nuova versione <strong>${esc(ev.version)}</strong> disponibile</div><button class="btn small" id="upd-download">Aggiorna</button>`);
       $('#upd-download').onclick = () => {
         showBanner('<div>Download in corso…</div><div class="progress"><div style="width:0%"></div></div>');
         api.updater.download();
@@ -1009,7 +1017,7 @@ function disegnaDialogWhatsApp() {
   const body = $('#wa-body');
   const actions = $('#wa-actions');
   if (st.stato === 'connesso') {
-    body.innerHTML = `<div class="wa-ok">✅ Connesso come <strong>${esc(formattaNumero(st.numero))}</strong></div>
+    body.innerHTML = `<div class="wa-ok"><span class="ic ic-check"></span> Connesso come <strong>${esc(formattaNumero(st.numero))}</strong></div>
       <p class="muted">I promemoria WhatsApp partono in automatico dall'orario impostato. Se l'app è chiusa o WhatsApp è disconnesso, i messaggi restano in attesa e partono al prossimo collegamento.</p>`;
     actions.innerHTML = '<button class="btn danger" id="wa-logout">Disconnetti</button><button class="btn primary" id="wa-close">Chiudi</button>';
   } else if (st.stato === 'qr' && st.qr) {
