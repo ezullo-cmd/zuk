@@ -46,7 +46,9 @@ contextBridge.exposeInMainWorld('api', {
     get: () => call('portale:get'),
     saveUrl: (url) => call('portale:saveUrl', url),
     accessoDb: () => call('portale:accessoDb'),
-    accessi: (utente) => call('portale:accessi', utente)
+    accessi: (utente) => call('portale:accessi', utente),
+    verifica: (clienteId, utente, password) => call('portale:verifica', clienteId, utente, password),
+    sblocca: (utente) => call('portale:sblocca', utente)
   },
   email: {
     get: () => call('email:get'),

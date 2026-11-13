@@ -97,6 +97,38 @@ async function creaAccessoDb() {
   return { databaseUrl: url, sessionSecret: crypto.randomBytes(32).toString('base64url') };
 }
 
+/**
+ * Controlla nome utente e password come farebbe il portale, ma dice il motivo preciso
+ * (solo nell'app desktop: il portale risponde sempre con un messaggio generico).
+ */
+async function verificaAccesso(clienteId, utente, password) {
+  const { verificaPassword } = require('../../portal/lib/password');
+  const { rows: [c] } = await db.requireMaster().query(
+    'SELECT id, nome, archiviato, portale_attivo, portale_utente, portale_password_hash FROM clienti WHERE id = $1', [clienteId]
+  );
+  if (!c) return { ok: false, motivo: 'Cliente non trovato' };
+  const u = String(utente || '').trim().toLowerCase();
+  if (!c.portale_utente) return { ok: false, motivo: 'Nessun nome utente salvato: compila i campi e premi Salva' };
+  if (u && u !== c.portale_utente) return { ok: false, motivo: `Il nome utente salvato è "${c.portale_utente}", non "${u}"` };
+  if (!c.portale_password_hash) return { ok: false, motivo: 'Nessuna password salvata: impostala e premi Salva' };
+  if (password && !verificaPassword(password, c.portale_password_hash))
+    return { ok: false, motivo: 'La password indicata non corrisponde a quella salvata (se l\'hai appena cambiata, premi prima Salva)' };
+  if (!c.portale_attivo) return { ok: false, motivo: 'L\'accesso al portale non è attivo: spunta la casella e premi Salva' };
+  if (c.archiviato) return { ok: false, motivo: 'Il cliente è archiviato' };
+  const { rows: [b] } = await db.requireMaster().query(
+    `SELECT count(*)::int AS n FROM portale_accessi WHERE utente = $1 AND NOT riuscito AND quando > now() - interval '15 minutes'`,
+    [c.portale_utente]
+  );
+  if (b.n >= 5) return { ok: false, motivo: 'Troppi tentativi sbagliati negli ultimi 15 minuti: accesso bloccato temporaneamente', bloccato: true };
+  return { ok: true, motivo: password ? `Tutto corretto: "${c.portale_utente}" può accedere con questa password` : `Accesso attivo per "${c.portale_utente}"` };
+}
+
+/** Sblocca subito un utente bloccato per troppi tentativi. */
+async function sblocca(utente) {
+  await db.requireMaster().query('DELETE FROM portale_accessi WHERE utente = $1 AND NOT riuscito', [utente]);
+  return true;
+}
+
 /** Ultimi accessi al portale di un cliente. */
 async function ultimiAccessi(utente, limite = 10) {
   if (!utente) return [];
@@ -107,4 +139,4 @@ async function ultimiAccessi(utente, limite = 10) {
   return rows;
 }
 
-module.exports = { RUOLO, PERSONE_VISIBILI, applicaPermessi, creaAccessoDb, ultimiAccessi, hostPooled };
+module.exports = { RUOLO, PERSONE_VISIBILI, applicaPermessi, creaAccessoDb, ultimiAccessi, hostPooled, verificaAccesso, sblocca };

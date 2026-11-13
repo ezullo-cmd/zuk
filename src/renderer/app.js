@@ -434,8 +434,26 @@ async function editCliente(cliente) {
         const pw = form.elements.portale_password;
         pw.placeholder = cliente?.portale_ha_password ? '•••••••• (impostata, lascia vuoto per non cambiarla)' : 'almeno 8 caratteri';
         info.innerHTML = `<div class="btn-row"><button type="button" class="btn small" id="btn-genera-pw">Genera password</button>
-            <button type="button" class="btn small" id="btn-copia-accesso">Copia dati di accesso</button></div>
+            <button type="button" class="btn small" id="btn-copia-accesso">Copia dati di accesso</button>
+            ${cliente ? '<button type="button" class="btn small" id="btn-verifica-accesso">Verifica accesso</button>' : ''}</div>
+          <div id="verifica-esito"></div>
           <div class="muted small" id="portale-dettagli"></div>`;
+        // compilando utente o password l'accesso si attiva da solo
+        const attiva = () => { if (form.elements.portale_utente.value && (pw.value || cliente?.portale_ha_password)) form.elements.portale_attivo.checked = true; };
+        form.elements.portale_utente.addEventListener('input', attiva);
+        pw.addEventListener('input', attiva);
+        if ($('#btn-verifica-accesso'))
+          $('#btn-verifica-accesso').onclick = async () => {
+            const r = await safe(() => api.portale.verifica(cliente.id, form.elements.portale_utente.value, pw.value));
+            $('#verifica-esito').innerHTML = `<div class="verifica ${r.ok ? 'ok' : 'ko'}">${r.ok ? '✅' : '⚠️'} ${esc(r.motivo)}
+              ${r.bloccato ? ' <button type="button" class="btn small" id="btn-sblocca">Sblocca ora</button>' : ''}</div>`;
+            if ($('#btn-sblocca'))
+              $('#btn-sblocca').onclick = async () => {
+                await safe(() => api.portale.sblocca(cliente.portale_utente));
+                toast('Accesso sbloccato');
+                $('#verifica-esito').innerHTML = '';
+              };
+          };
         $('#btn-genera-pw').onclick = () => {
           pw.type = 'text';
           pw.value = generaPassword();
@@ -455,7 +473,9 @@ async function editCliente(cliente) {
           if (cliente?.portale_utente) {
             const acc = await api.portale.accessi(cliente.portale_utente).catch(() => []);
             const ok = acc.find((a) => a.riuscito);
-            righe.push(ok ? `Ultimo accesso: ${fmtDateTime(ok.quando)}` : 'Nessun accesso finora.');
+            righe.push(ok ? `Ultimo accesso: ${fmtDateTime(ok.quando)}` : 'Nessun accesso riuscito finora.');
+            const ko = acc.filter((a) => !a.riuscito).slice(0, 3);
+            if (ko.length) righe.push(`Tentativi non riusciti: ${ko.map((a) => fmtDateTime(a.quando)).join(', ')}`);
           }
           $('#portale-dettagli').innerHTML = righe.join('<br>');
         });

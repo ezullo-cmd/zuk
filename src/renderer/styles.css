@@ -243,3 +243,7 @@ code { background: #f1f3f6; padding: 1px 4px; border-radius: 4px; font-size: 12p
 /* ---- Portale ---- */
 .accesso-db { background: #f6f8fb; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .accesso-db textarea { font-family: ui-monospace, monospace; font-size: 12px; cursor: copy; }
+
+.verifica { margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+.verifica.ok { background: #e3f6ea; color: var(--ok); }
+.verifica.ko { background: var(--late-bg); color: var(--late); }

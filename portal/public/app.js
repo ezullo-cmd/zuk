@@ -20,11 +20,13 @@ function toast(msg, err = false) {
   toastT = setTimeout(() => t.classList.add('hidden'), 4000);
 }
 
+let silenzioso = false; // al primo caricamento non si mostra "sessione scaduta"
+
 async function api(tipo, params = {}) {
   const q = new URLSearchParams({ tipo, ...params });
   const r = await fetch('/api/dati?' + q, { credentials: 'same-origin' });
   const d = await r.json().catch(() => ({}));
-  if (r.status === 401) { mostraLogin(d.errore); throw new Error('non autenticato'); }
+  if (r.status === 401) { mostraLogin(silenzioso ? '' : d.errore); throw new Error('non autenticato'); }
   if (!r.ok) throw new Error(d.errore || 'Errore');
   return d;
 }
@@ -48,7 +50,7 @@ $('#login-form').onsubmit = async (ev) => {
   try {
     const r = await fetch('/api/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-      body: JSON.stringify({ utente: f.utente.value, password: f.password.value })
+      body: JSON.stringify({ utente: f.utente.value.trim(), password: f.password.value.trim() })
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) return mostraLogin(d.errore || 'Accesso non riuscito');
@@ -79,11 +81,14 @@ const testoSu = (hex) => {
   return 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) > 170 ? '#1d2330' : '#ffffff';
 };
 
-async function avvia() {
+async function avvia(primoAvvio = false) {
+  silenzioso = primoAvvio;
   try {
     cliente = await api('cliente');
   } catch {
     return;
+  } finally {
+    silenzioso = false;
   }
   document.documentElement.style.setProperty('--cliente', cliente.colore || '#2f6fed');
   document.documentElement.style.setProperty('--on-cliente', testoSu(cliente.colore));
@@ -375,4 +380,4 @@ VISTE.acquisti = async () => {
 };
 
 // ---------- Avvio --------------------------------------------------------------
-avvia();
+avvia(true);

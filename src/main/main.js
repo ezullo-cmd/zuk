@@ -91,6 +91,8 @@ function registerIpc() {
   });
   handle('portale:accessoDb', () => portale.creaAccessoDb());
   handle('portale:accessi', (utente) => portale.ultimiAccessi(utente));
+  handle('portale:verifica', (clienteId, utente, password) => portale.verificaAccesso(clienteId, utente, password));
+  handle('portale:sblocca', (utente) => portale.sblocca(utente));
   handle('clienti:update', (id, data) => db.updateCliente(id, data));
   handle('clienti:archive', (id, archiviato) => db.setArchiviato(id, archiviato));
 
