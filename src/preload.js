@@ -41,6 +41,13 @@ contextBridge.exposeInMainWorld('api', {
     rimettiInCoda: (clienteId, id) => call('promemoria:rimetti', clienteId, id),
     onAggiornati: (cb) => ipcRenderer.on('promemoria:aggiornati', (_e, esito) => cb(esito))
   },
+  apriLink: (url) => ipcRenderer.invoke('app:apriLink', url),
+  portale: {
+    get: () => call('portale:get'),
+    saveUrl: (url) => call('portale:saveUrl', url),
+    accessoDb: () => call('portale:accessoDb'),
+    accessi: (utente) => call('portale:accessi', utente)
+  },
   email: {
     get: () => call('email:get'),
     save: (data) => call('email:save', data),

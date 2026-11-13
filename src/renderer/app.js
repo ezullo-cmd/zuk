@@ -392,8 +392,20 @@ const CLIENTE_FIELDS = [
   { name: 'promemoria_testo', label: 'Testo del promemoria', type: 'textarea' },
   { name: 'segnaposto', type: 'html' },
   { name: 'promemoria_oggetto', label: 'Oggetto dell\'email', full: true },
-  { name: 'promemoria_mittente', label: 'Nome del mittente nelle email (es. Gianmarco Personal Trainer)', full: true }
+  { name: 'promemoria_mittente', label: 'Nome del mittente nelle email (es. Gianmarco Personal Trainer)', full: true },
+  { type: 'heading', label: 'Portale web (sola lettura)' },
+  { name: 'portale_attivo', label: 'Il cliente può accedere al portale e consultare i suoi dati', type: 'checkbox', full: true },
+  { name: 'portale_utente', label: 'Nome utente', placeholder: 'es. gianmarco' },
+  { name: 'portale_password', label: 'Password', type: 'password' },
+  { name: 'portale_info', type: 'html' }
 ];
+
+// password leggibile da comunicare al cliente (niente caratteri ambigui)
+function generaPassword() {
+  const c = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const v = crypto.getRandomValues(new Uint32Array(12));
+  return Array.from(v, (x) => c[x % c.length]).join('').replace(/(.{4})(?!$)/g, '$1-');
+}
 
 async function editCliente(cliente) {
   const fields = CLIENTE_FIELDS.map((f) => (typeof f.options === 'function' ? { ...f, options: f.options() } : f));
@@ -405,7 +417,9 @@ async function editCliente(cliente) {
       ...(cliente || { colore: PALETTE[clienti.length % PALETTE.length], sezioni: [] }),
       promemoria_testo: cliente?.promemoria_testo || def.testo,
       promemoria_oggetto: cliente?.promemoria_oggetto || def.oggetto,
-      promemoria_mittente: cliente?.promemoria_mittente || cliente?.nome || ''
+      promemoria_mittente: cliente?.promemoria_mittente || cliente?.nome || '',
+      portale_utente: cliente?.portale_utente || '',
+      portale_password: ''
     },
     onInput: (v, form) => {
       const seg = $('#segnaposto');
@@ -414,9 +428,42 @@ async function editCliente(cliente) {
           <code>&lt;tipo percorso&gt;</code> <code>&lt;importo&gt;</code> <code>&lt;numero rata&gt;</code>
           · <a class="link" id="testo-default">ripristina testo predefinito</a></div>`;
       $('#testo-default').onclick = () => { form.elements.promemoria_testo.value = def.testo; };
+      const info = $('#portale_info');
+      if (!info.dataset.pronto) {
+        info.dataset.pronto = '1';
+        const pw = form.elements.portale_password;
+        pw.placeholder = cliente?.portale_ha_password ? '•••••••• (impostata, lascia vuoto per non cambiarla)' : 'almeno 8 caratteri';
+        info.innerHTML = `<div class="btn-row"><button type="button" class="btn small" id="btn-genera-pw">Genera password</button>
+            <button type="button" class="btn small" id="btn-copia-accesso">Copia dati di accesso</button></div>
+          <div class="muted small" id="portale-dettagli"></div>`;
+        $('#btn-genera-pw').onclick = () => {
+          pw.type = 'text';
+          pw.value = generaPassword();
+          if (!form.elements.portale_utente.value)
+            form.elements.portale_utente.value = (form.elements.nome.value || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '');
+          form.elements.portale_attivo.checked = true;
+          toast('Password generata: copiala e comunicala al cliente prima di salvare');
+        };
+        $('#btn-copia-accesso').onclick = async () => {
+          const { url } = await api.portale.get();
+          const testo = `Indirizzo: ${url || '(indirizzo del portale)'}\nNome utente: ${form.elements.portale_utente.value}\nPassword: ${pw.value || '(quella già comunicata)'}`;
+          await navigator.clipboard.writeText(testo);
+          toast('Dati di accesso copiati');
+        };
+        api.portale.get().then(async ({ url }) => {
+          const righe = [url ? `Indirizzo del portale: <strong>${esc(url)}</strong>` : 'Indirizzo del portale non ancora impostato (Impostazioni → Portale web).'];
+          if (cliente?.portale_utente) {
+            const acc = await api.portale.accessi(cliente.portale_utente).catch(() => []);
+            const ok = acc.find((a) => a.riuscito);
+            righe.push(ok ? `Ultimo accesso: ${fmtDateTime(ok.quando)}` : 'Nessun accesso finora.');
+          }
+          $('#portale-dettagli').innerHTML = righe.join('<br>');
+        });
+      }
     },
     onSubmit: async (d) => {
-      const data = d;
+      const data = { ...d };
+      if (!data.portale_password) delete data.portale_password;
       const saved = cliente ? await api.clienti.update(cliente.id, data) : await api.clienti.create(data);
       toast(cliente ? 'Cliente aggiornato' : 'Cliente creato (database dedicato pronto)');
       await loadClienti();
@@ -631,6 +678,7 @@ async function renderSection(cliente, table) {
 async function renderSettings() {
   const cfg = await api.settings.get();
   const em = await api.email.get();
+  const portale = await api.portale.get();
   const info = await api.appInfo();
   const db = cfg.db;
   content.innerHTML = `
@@ -680,6 +728,20 @@ async function renderSettings() {
       <p class="muted small">La password resta solo su questo computer, cifrata. Email e WhatsApp partono dall'orario indicato, 5 giorni lavorativi prima di ogni scadenza, se l'app è aperta.</p>
     </div>
     <div class="panel">
+      <h3>Portale web per i clienti</h3>
+      <p class="muted">Il sito dove i tuoi clienti consultano i loro dati in sola lettura (senza campi sanitari).
+        Le credenziali di ogni cliente si impostano in “Modifica cliente”.</p>
+      <form id="portale-form" class="form-grid">
+        <label class="full">Indirizzo del portale<input name="url" type="url" value="${esc(portale.url)}" placeholder="https://nome-progetto.vercel.app"></label>
+        <div class="btn-row full">
+          <button type="submit" class="btn">Salva indirizzo</button>
+          ${portale.url ? `<a class="btn" href="${esc(portale.url)}" id="apri-portale">Apri il portale</a>` : ''}
+          <button type="button" class="btn" id="btn-accesso-db">Genera accesso al database per Vercel</button>
+        </div>
+      </form>
+      <div id="accesso-db"></div>
+    </div>
+    <div class="panel">
       <h3>Aggiornamenti</h3>
       <p class="muted">L'app controlla automaticamente la presenza di nuove versioni all'avvio e ogni 30 minuti.</p>
       <button class="btn" id="btn-check-update">Controlla ora</button>
@@ -724,6 +786,23 @@ async function renderSettings() {
     renderSettings();
   };
   $('#btn-check-update').onclick = () => api.updater.check();
+  $('#portale-form').onsubmit = async (e) => {
+    e.preventDefault();
+    await safe(() => api.portale.saveUrl(e.target.url.value));
+    toast('Indirizzo salvato');
+    renderSettings();
+  };
+  if ($('#apri-portale')) $('#apri-portale').onclick = (e) => { e.preventDefault(); api.apriLink(portale.url); };
+  $('#btn-accesso-db').onclick = async () => {
+    if (!confirm('Generare un nuovo accesso al database per il portale? Se il portale è già online, dovrai aggiornare DATABASE_URL su Vercel.')) return;
+    const r = await safe(() => api.portale.accessoDb());
+    $('#accesso-db').innerHTML = `<div class="accesso-db">
+      <p><strong>Copia questi due valori su Vercel</strong> (Settings → Environment Variables). Non vengono salvati qui: se li perdi, generane di nuovi.</p>
+      <label>DATABASE_URL<textarea readonly rows="2">${esc(r.databaseUrl)}</textarea></label>
+      <label>SESSION_SECRET<textarea readonly rows="1">${esc(r.sessionSecret)}</textarea></label>
+    </div>`;
+    $('#accesso-db').querySelectorAll('textarea').forEach((t) => (t.onclick = () => { t.select(); navigator.clipboard.writeText(t.value); toast('Copiato'); }));
+  };
   const ef = $('#email-form');
   const leggiEmail = () => ({
     user: ef.user.value.trim(), password: ef.password.value, orario: ef.orario.value,

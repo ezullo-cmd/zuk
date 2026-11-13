@@ -6,7 +6,7 @@
 const nodemailer = require('nodemailer');
 const db = require('./db');
 const persone = require('./persone');
-const { giorniLavorativiPrima } = require('./calendario');
+const { giorniLavorativiPrima } = require('../../portal/lib/calendario');
 
 const GIORNI_PRIMA = 5;
 const TESTO_DEFAULT =

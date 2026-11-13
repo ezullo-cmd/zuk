@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#1c2333">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Area clienti">
+  <title>Area clienti</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- Accesso -->
+  <section id="login" class="login hidden">
+    <form id="login-form" class="login-card" autocomplete="on">
+      <img src="/icon.svg" alt="" class="login-logo">
+      <h1>Area clienti</h1>
+      <p class="muted">Consultazione in sola lettura</p>
+      <label>Nome utente<input name="utente" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <div id="login-errore" class="errore hidden"></div>
+      <button type="submit" class="btn primary">Accedi</button>
+    </form>
+  </section>
+
+  <!-- Applicazione -->
+  <section id="app" class="hidden">
+    <header class="top" id="top">
+      <div class="top-row">
+        <span id="cliente-logo" class="logo"></span>
+        <div class="top-title"><strong id="cliente-nome"></strong><span class="badge-ro">sola lettura</span></div>
+        <button id="btn-logout" class="btn small ghost-light">Esci</button>
+      </div>
+      <nav id="tabs" class="tabs"></nav>
+    </header>
+    <main id="content" class="content"></main>
+  </section>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

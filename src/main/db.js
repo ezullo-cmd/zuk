@@ -2,6 +2,7 @@
 // - Un DB "master" (zuk_master) con l'anagrafica dei clienti.
 // - Un DB separato per ogni cliente (zuk_cliente_<id>) con appuntamenti, fatture e acquisti.
 const { Pool, Client, types } = require('pg');
+const { hashPassword } = require('../../portal/lib/password');
 
 // DATE -> stringa 'YYYY-MM-DD' (evita slittamenti di fuso), NUMERIC -> number
 types.setTypeParser(1082, (v) => v);
@@ -94,7 +95,19 @@ const MASTER_MIGRATIONS = [
    ALTER TABLE clienti ADD COLUMN promemoria_oggetto TEXT;
    ALTER TABLE clienti ADD COLUMN smtp JSONB`,
   // v5: nome del mittente nei promemoria (la casella email è unica, nelle Impostazioni dell'app)
-  `ALTER TABLE clienti ADD COLUMN promemoria_mittente TEXT`
+  `ALTER TABLE clienti ADD COLUMN promemoria_mittente TEXT`,
+  // v6: accesso al portale web in sola lettura e registro degli accessi
+  `ALTER TABLE clienti ADD COLUMN portale_attivo BOOLEAN NOT NULL DEFAULT false;
+   ALTER TABLE clienti ADD COLUMN portale_utente TEXT UNIQUE;
+   ALTER TABLE clienti ADD COLUMN portale_password_hash TEXT;
+   CREATE TABLE portale_accessi (
+     id        SERIAL PRIMARY KEY,
+     utente    TEXT NOT NULL,
+     ip        TEXT,
+     riuscito  BOOLEAN NOT NULL,
+     quando    TIMESTAMPTZ NOT NULL DEFAULT now()
+   );
+   CREATE INDEX portale_accessi_idx ON portale_accessi (utente, quando);`
 ];
 
 const CLIENT_MIGRATIONS = [
@@ -284,8 +297,39 @@ async function poolForCliente(clienteId) {
 
 const CLIENTE_FIELDS = [
   'nome', 'email', 'telefono', 'partita_iva', 'indirizzo', 'note', 'colore', 'sezioni', 'logo',
-  'promemoria_attivi', 'promemoria_testo', 'promemoria_oggetto', 'promemoria_mittente'
+  'promemoria_attivi', 'promemoria_testo', 'promemoria_oggetto', 'promemoria_mittente',
+  'portale_attivo', 'portale_utente', 'portale_password_hash'
 ];
+
+// Dati del cliente per l'interfaccia: l'impronta della password del portale non esce mai
+function pubblico(c) {
+  if (!c) return c;
+  const { portale_password_hash, ...resto } = c;
+  return { ...resto, portale_ha_password: !!portale_password_hash };
+}
+
+/** Converte la password del portale in impronta e controlla che l'accesso sia completo. */
+async function preparaPortale(data, esistente = {}) {
+  const d = { ...data };
+  delete d.portale_password_hash; // mai accettato dall'interfaccia
+  if (d.portale_password) {
+    if (String(d.portale_password).length < 8) throw new Error('La password del portale deve avere almeno 8 caratteri');
+    d.portale_password_hash = hashPassword(d.portale_password);
+  }
+  delete d.portale_password;
+  const attivo = 'portale_attivo' in d ? !!d.portale_attivo : !!esistente.portale_attivo;
+  const utente = 'portale_utente' in d ? d.portale_utente : esistente.portale_utente;
+  const haPassword = !!(d.portale_password_hash || esistente.portale_password_hash);
+  if (attivo && (!utente || !haPassword)) throw new Error('Per attivare il portale servono nome utente e password');
+  return d;
+}
+
+const erroreUtenteDuplicato = (e) => {
+  if (e.code === '23505' && /portale_utente/.test(e.constraint || e.detail || '')) {
+    throw new Error('Questo nome utente del portale è già usato da un altro cliente');
+  }
+  throw e;
+};
 
 // Sezioni che si possono attivare nella pagina di un cliente
 const SEZIONI = ['anagrafica', 'appuntamenti', 'servizi', 'pagamenti', 'fatture', 'acquisti'];
@@ -301,7 +345,14 @@ function clienteValue(field, value) {
     if (value.length > 2_000_000) throw new Error('Logo troppo grande');
     return value;
   }
-  if (field === 'promemoria_attivi') return !!value;
+  if (field === 'promemoria_attivi' || field === 'portale_attivo') return !!value;
+  if (field === 'portale_password_hash') return value;
+  if (field === 'portale_utente') {
+    const u = String(value || '').trim().toLowerCase();
+    if (!u) return null;
+    if (!/^[a-z0-9._-]{3,40}$/.test(u)) throw new Error('Nome utente del portale: 3-40 caratteri tra lettere, numeri, punto, trattino');
+    return u;
+  }
   if (field === 'smtp') {
     if (!value || !value.host) return null;
     const { host, port, secure, user, password, mittente } = value;
@@ -319,22 +370,25 @@ async function listClienti({ includiArchiviati = false } = {}) {
   const { rows } = await requireMaster().query(
     `SELECT * FROM clienti ${includiArchiviati ? '' : 'WHERE NOT archiviato'} ORDER BY nome`
   );
-  return rows;
+  return rows.map(pubblico);
 }
 
-async function getCliente(id) {
+async function getClienteCompleto(id) {
   const { rows } = await requireMaster().query('SELECT * FROM clienti WHERE id = $1', [id]);
   return rows[0] || null;
 }
 
-async function createCliente(data) {
+const getCliente = async (id) => pubblico(await getClienteCompleto(id));
+
+async function createCliente(input) {
   const master = requireMaster();
+  const data = await preparaPortale(input);
   const fields = CLIENTE_FIELDS.filter((f) => data[f] !== undefined);
   const vals = fields.map((f) => clienteValue(f, data[f]));
   const { rows } = await master.query(
     `INSERT INTO clienti (${fields.join(',')}) VALUES (${fields.map((_, i) => `$${i + 1}`).join(',')}) RETURNING id`,
     vals
-  );
+  ).catch(erroreUtenteDuplicato);
   const id = rows[0].id;
   const dbName = `${cfg.clientDbPrefix}${id}`;
   try {
@@ -348,13 +402,14 @@ async function createCliente(data) {
   return getCliente(id);
 }
 
-async function updateCliente(id, data) {
+async function updateCliente(id, input) {
+  const data = await preparaPortale(input, (await getClienteCompleto(id)) || {});
   const fields = CLIENTE_FIELDS.filter((f) => f in data);
   if (fields.length) {
     await requireMaster().query(
       `UPDATE clienti SET ${fields.map((f, i) => `${f} = $${i + 1}`).join(', ')} WHERE id = $${fields.length + 1}`,
       [...fields.map((f) => clienteValue(f, data[f])), id]
-    );
+    ).catch(erroreUtenteDuplicato);
   }
   return getCliente(id);
 }
@@ -484,5 +539,5 @@ async function testConnection(dbConfig) {
 module.exports = {
   init, close, isReady, testConnection,
   listClienti, getCliente, createCliente, updateCliente, setArchiviato,
-  list, create, update, remove, dashboard, poolForCliente
+  list, create, update, remove, dashboard, poolForCliente, requireMaster, getConfig: () => cfg
 };

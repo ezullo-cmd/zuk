@@ -239,3 +239,7 @@ code { background: #f1f3f6; padding: 1px 4px; border-radius: 4px; font-size: 12p
 .wa-steps { padding-left: 20px; line-height: 1.8; }
 .wa-ok { font-size: 16px; margin-bottom: 8px; }
 .warn-text { color: var(--warn); font-weight: 600; }
+
+/* ---- Portale ---- */
+.accesso-db { background: #f6f8fb; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.accesso-db textarea { font-family: ui-monospace, monospace; font-size: 12px; cursor: copy; }

@@ -8,6 +8,10 @@ const db = require('./db');
 const persone = require('./persone');
 const promemoria = require('./promemoria');
 const whatsapp = require('./whatsapp');
+const portale = require('./portale');
+
+// i permessi dell'utente del portale vanno riapplicati quando cambiano tabelle o clienti
+const aggiornaPermessiPortale = () => portale.applicaPermessi().catch((e) => log.warn('Permessi portale:', e.message));
 
 promemoria.configura({
   emailConfig: () => config.emailConfig(),
@@ -60,6 +64,7 @@ function registerIpc() {
     const cfg = config.load();
     cfg.db = { ...cfg.db, ...dbCfg };
     await db.init(cfg.db); // se fallisce non salviamo
+    aggiornaPermessiPortale();
     config.save(cfg);
     return true;
   });
@@ -67,7 +72,25 @@ function registerIpc() {
   handle('dashboard', () => db.dashboard());
   handle('clienti:list', (opts) => db.listClienti(opts));
   handle('clienti:get', (id) => db.getCliente(id));
-  handle('clienti:create', (data) => db.createCliente(data));
+  handle('clienti:create', async (data) => {
+    const c = await db.createCliente(data);
+    aggiornaPermessiPortale();
+    return c;
+  });
+
+  // Portale web in sola lettura
+  ipcMain.handle('app:apriLink', (_e, url) => {
+    if (/^https?:\/\//.test(String(url))) shell.openExternal(url);
+  });
+  handle('portale:get', () => ({ url: config.load().portaleUrl || '' }));
+  handle('portale:saveUrl', (url) => {
+    const c = config.load();
+    c.portaleUrl = String(url || '').trim().replace(/\/+$/, '');
+    config.save(c);
+    return true;
+  });
+  handle('portale:accessoDb', () => portale.creaAccessoDb());
+  handle('portale:accessi', (utente) => portale.ultimiAccessi(utente));
   handle('clienti:update', (id, data) => db.updateCliente(id, data));
   handle('clienti:archive', (id, archiviato) => db.setArchiviato(id, archiviato));
 
@@ -172,6 +195,7 @@ app.whenReady().then(async () => {
   registerIpc();
   try {
     await db.init(config.load().db);
+    aggiornaPermessiPortale();
   } catch (err) {
     log.warn('Connessione DB non riuscita all\'avvio:', err.message);
   }

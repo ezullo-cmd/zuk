@@ -1,0 +1,11 @@
+{
+  "name": "zuk-portale",
+  "private": true,
+  "description": "Portale web in sola lettura per i clienti di Zuk Gestionale",
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
+  }
+}

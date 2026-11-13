@@ -35,6 +35,7 @@
     "artifactName": "Zuk-Gestionale-${version}-${arch}.${ext}",
     "files": [
       "src/**/*",
+      "portal/lib/**/*",
       "package.json"
     ],
     "directories": {
