@@ -12,7 +12,7 @@ const GIORNI_PRIMA = 5;
 const TESTO_DEFAULT =
   'Salve <nome>, le ricordiamo che in data <data di scadenza> scadrà la prossima rata del percorso <tipo percorso>.';
 const OGGETTO_DEFAULT = 'Promemoria scadenza rata';
-const TIPI_PERCORSO = { nutrizione: 'Nutrizione', personal: 'Allenamento', personal_nutrizione: 'Nutrizione + Allenamento', trattamento: 'Trattamento', ristrutturazione_edile: 'Ristrutturazione edile' };
+const { nomePercorso } = require('../../portal/lib/calcoli');
 
 // ---- Data di invio: N giorni lavorativi prima della scadenza ----------------------
 const pad = (n) => String(n).padStart(2, '0');
@@ -27,7 +27,7 @@ function componiTesto(modello, persona, rata) {
     nome: persona.nome,
     cognome: persona.cognome,
     'data di scadenza': dataIT(rata.scadenza),
-    'tipo percorso': TIPI_PERCORSO[rata.tipo_percorso] || 'in corso',
+    'tipo percorso': nomePercorso(rata.tipo_percorso) || 'in corso',
     importo: euro(rata.importo),
     'numero rata': rata.numero_rata ? `${rata.numero_rata} di ${rata.di}` : ''
   };

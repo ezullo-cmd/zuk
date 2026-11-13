@@ -29,6 +29,10 @@ const STATI_PERCORSO = {
   concluso: '<span class="badge annullata">Concluso</span>'
 };
 
+const ALTRO_TIPO = '__altro__';
+// nome leggibile di un tipo di percorso (di base o scritto a mano)
+const nomeTipo = (k) => (TIPI_PERCORSO.find(([v]) => v === k) || [, k || ''])[1];
+
 const label = (list, k) => (list.find(([v]) => v === k) || [, k || ''])[1];
 const tipoBreve = (k) => label(TIPI_PAGAMENTO, k).replace(/ \(.*\)/, '');
 
@@ -63,8 +67,12 @@ const PERSONA_FIELDS = [
 ];
 
 // Campi del percorso (con prefisso p_ quando sono nel modulo "Nuova persona")
-const percorsoFields = (px = '') => [
-  { name: px + 'tipo', label: 'Tipo di percorso', type: 'select', options: TIPI_PERCORSO, full: true },
+const percorsoFields = (px = '', tipiCliente = []) => [
+  {
+    name: px + 'tipo', label: 'Tipo di percorso', type: 'select', full: true,
+    options: [...TIPI_PERCORSO, ...tipiCliente.map((t) => [t, t]), [ALTRO_TIPO, '✏️ Altro… (scrivi un nuovo tipo)']]
+  },
+  { name: px + 'tipo_altro', label: 'Nuovo tipo di percorso', full: true, required: true, showIf: { field: px + 'tipo', value: ALTRO_TIPO } },
   { name: px + 'data_inizio', label: 'Inizio del percorso', type: 'date', required: true },
   { name: px + 'durata_mesi', label: 'Durata del percorso', type: 'select', options: DURATE_MESI },
   { name: px + 'importo_totale', label: 'Importo totale (€)', type: 'number', step: '0.01', required: true },
@@ -113,7 +121,7 @@ function gestoreAnteprima(px = '', primaIniziale = null) {
 }
 
 const percorsoDaForm = (d, px = '') => ({
-  tipo: d[px + 'tipo'],
+  tipo: d[px + 'tipo'] === ALTRO_TIPO ? String(d[px + 'tipo_altro'] || '').trim() : d[px + 'tipo'],
   data_inizio: d[px + 'data_inizio'],
   durata_mesi: Number(d[px + 'durata_mesi']),
   importo_totale: d[px + 'importo_totale'],
@@ -124,11 +132,12 @@ const percorsoDaForm = (d, px = '') => ({
 
 const oggiISO = () => new Date().toISOString().slice(0, 10);
 
-function editPersona(cliente, persona, onDone) {
+async function editPersona(cliente, persona, onDone) {
   const nuovo = !persona;
+  const tipiCliente = nuovo ? await api.percorsi.tipi(cliente.id).catch(() => []) : [];
   openForm({
     title: persona ? `Modifica ${persona.nome} ${persona.cognome}` : 'Nuova persona',
-    fields: nuovo ? [...PERSONA_FIELDS, { type: 'heading', label: 'Percorso' }, ...percorsoFields('p_')] : PERSONA_FIELDS,
+    fields: nuovo ? [...PERSONA_FIELDS, { type: 'heading', label: 'Percorso' }, ...percorsoFields('p_', tipiCliente)] : PERSONA_FIELDS,
     values: persona || {
       stato: 'attivo', p_tipo: 'personal', p_data_inizio: oggiISO(), p_durata_mesi: '3', p_modalita: 'unica', p_numero_rate: '3'
     },
@@ -143,7 +152,8 @@ function editPersona(cliente, persona, onDone) {
   });
 }
 
-function editPercorso(cliente, persona, percorso, onDone, precedente) {
+async function editPercorso(cliente, persona, percorso, onDone, precedente) {
+  const tipiCliente = await api.percorsi.tipi(cliente.id).catch(() => []);
   let values;
   // scadenza della 1ª rata: quella reale del percorso; se era la predefinita continua a seguire la data di inizio
   let primaAuto = null;
@@ -172,7 +182,7 @@ function editPercorso(cliente, persona, percorso, onDone, precedente) {
       values.prima_scadenza = `${values.data_inizio.slice(0, 7)}-${String(Math.min(giorno, ultimo)).padStart(2, '0')}`;
     }
   } else values = { tipo: 'personal', data_inizio: oggiISO(), durata_mesi: '3', modalita: 'unica', numero_rate: '3' };
-  const fields = [...percorsoFields(), { name: 'note', label: 'Note', type: 'textarea' }];
+  const fields = [...percorsoFields('', tipiCliente), { name: 'note', label: 'Note', type: 'textarea' }];
   if (precedente) {
     fields[0] = { ...fields[0], label: 'Cosa rinnova' };
     fields.unshift({ name: 'info_rinnovo', type: 'html' });
@@ -186,7 +196,7 @@ function editPercorso(cliente, persona, percorso, onDone, precedente) {
       anteprima(v, form);
       if (precedente)
         $('#info_rinnovo').innerHTML = `<div class="rinnovo-info"><span class="muted">Percorso precedente</span>
-          <strong>${esc(label(TIPI_PERCORSO, precedente.tipo))}</strong> · ${precedente.durata_mesi} ${precedente.durata_mesi === 1 ? 'mese' : 'mesi'}
+          <strong>${esc(nomeTipo(precedente.tipo))}</strong> · ${precedente.durata_mesi} ${precedente.durata_mesi === 1 ? 'mese' : 'mesi'}
           · dal ${fmtDate(precedente.data_inizio)} al ${fmtDate(precedente.fine)}
           · ${precedente.importo_totale !== null ? eur(precedente.importo_totale) : '—'} ${precedente.modalita === 'rate' ? `in ${precedente.numero_rate} rate` : 'in unica soluzione'}</div>`;
     },
@@ -208,7 +218,7 @@ function badgePercorso(pa, sit) {
     extra = ` <span class="badge warn">Da rinnovare · ${pa.giorniAllaFine <= 0 ? 'termina oggi' : `termina tra ${pa.giorniAllaFine} gg`}</span>`;
   else if (pa.stato === 'concluso') extra = ' <span class="badge annullata">Concluso</span>';
   else if (pa.stato === 'futuro') extra = ' <span class="badge annullata">Da iniziare</span>';
-  return `${esc(label(TIPI_PERCORSO, pa.tipo))}${rinnovi}<div class="muted small">fino al ${fmtDate(pa.fine)}${extra}</div>`;
+  return `${esc(nomeTipo(pa.tipo))}${rinnovi}<div class="muted small">fino al ${fmtDate(pa.fine)}${extra}</div>`;
 }
 
 /** Etichetta del periodo coperto da una rata: "novembre 2026" o "ottobre – dicembre 2026". */
@@ -392,7 +402,7 @@ async function renderPersona(cliente, el, personaId) {
                 (pc) => `<div class="percorso ${pc.rate.some((r) => r.stato === 'in_ritardo') ? 'late' : ''}">
                   <div class="percorso-head">
                     <div>
-                      <strong>${esc(label(TIPI_PERCORSO, pc.tipo))}</strong> ${STATI_PERCORSO[pc.stato]}
+                      <strong>${esc(nomeTipo(pc.tipo))}</strong> ${STATI_PERCORSO[pc.stato]}
                       ${pc.rinnovo_di ? '<span class="badge rinnovo">↻ Rinnovo</span>' : ''}
                       ${pc.stato === 'in_corso' && pc.giorniAllaFine <= 30 && !s.percorsi.some((x) => x.stato === 'futuro') ? `<span class="badge warn">Da rinnovare · termina tra ${Math.max(pc.giorniAllaFine, 0)} gg</span>` : ''}
                       <div class="muted small">

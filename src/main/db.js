@@ -238,19 +238,32 @@ const CLIENT_MIGRATIONS = [
   `ALTER TABLE acquisti ADD COLUMN consegna_prevista DATE;
    ALTER TABLE acquisti ADD COLUMN consegnato BOOLEAN NOT NULL DEFAULT false;
    ALTER TABLE acquisti ADD COLUMN data_consegna DATE;
-   UPDATE acquisti SET consegnato = true, data_consegna = data;`
+   UPDATE acquisti SET consegnato = true, data_consegna = data;`,
+  // v9: tipi di percorso scritti a mano (poi selezionabili)
+  `CREATE TABLE tipi_percorso (
+     id        SERIAL PRIMARY KEY,
+     nome      TEXT NOT NULL UNIQUE,
+     creato_il TIMESTAMPTZ NOT NULL DEFAULT now()
+   )`
 ];
 
 async function migrate(pool, migrations) {
+  // Ogni passo avviene in una transazione con un blocco sul database: se due richieste
+  // (o due PC con l'app aperta) aggiornano lo stesso database insieme, una aspetta l'altra.
   const c = await pool.connect();
   try {
-    await c.query('CREATE TABLE IF NOT EXISTS schema_version (version INT NOT NULL)');
-    const { rows } = await c.query('SELECT version FROM schema_version');
-    let version = rows.length ? rows[0].version : 0;
-    if (!rows.length) await c.query('INSERT INTO schema_version VALUES (0)');
-    for (; version < migrations.length; version++) {
+    for (;;) {
       await c.query('BEGIN');
       try {
+        await c.query('SELECT pg_advisory_xact_lock(815001)');
+        await c.query('CREATE TABLE IF NOT EXISTS schema_version (version INT NOT NULL)');
+        const { rows } = await c.query('SELECT version FROM schema_version');
+        if (!rows.length) await c.query('INSERT INTO schema_version VALUES (0)');
+        const version = rows.length ? rows[0].version : 0;
+        if (version >= migrations.length) {
+          await c.query('COMMIT');
+          return;
+        }
         await c.query(migrations[version]);
         await c.query('UPDATE schema_version SET version = $1', [version + 1]);
         await c.query('COMMIT');
@@ -270,6 +283,7 @@ async function close() {
   const pools = [masterPool, ...clientPools.values()].filter(Boolean);
   masterPool = null;
   clientPools.clear();
+  poolInApertura.clear();
   await Promise.allSettled(pools.map((p) => p.end()));
 }
 
@@ -288,14 +302,28 @@ function requireMaster() {
   return masterPool;
 }
 
-async function poolForCliente(clienteId) {
-  if (clientPools.has(clienteId)) return clientPools.get(clienteId);
-  const { rows } = await requireMaster().query('SELECT db_name FROM clienti WHERE id = $1', [clienteId]);
-  if (!rows.length) throw new Error('Cliente non trovato');
-  const pool = makePool(rows[0].db_name, 3);
-  await migrate(pool, CLIENT_MIGRATIONS); // porta il DB del cliente all'ultima versione
-  clientPools.set(clienteId, pool);
-  return pool;
+// Una sola apertura (e un solo aggiornamento) per cliente, anche con più richieste insieme
+const poolInApertura = new Map();
+
+function poolForCliente(clienteId) {
+  if (clientPools.has(clienteId)) return Promise.resolve(clientPools.get(clienteId));
+  if (!poolInApertura.has(clienteId)) {
+    const apertura = (async () => {
+      const { rows } = await requireMaster().query('SELECT db_name FROM clienti WHERE id = $1', [clienteId]);
+      if (!rows.length) throw new Error('Cliente non trovato');
+      const pool = makePool(rows[0].db_name, 3);
+      try {
+        await migrate(pool, CLIENT_MIGRATIONS); // porta il DB del cliente all'ultima versione
+      } catch (e) {
+        pool.end().catch(() => {});
+        throw e;
+      }
+      clientPools.set(clienteId, pool);
+      return pool;
+    })().finally(() => poolInApertura.delete(clienteId));
+    poolInApertura.set(clienteId, apertura);
+  }
+  return poolInApertura.get(clienteId);
 }
 
 // ---- Clienti (DB master) ------------------------------------------------------

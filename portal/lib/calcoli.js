@@ -93,7 +93,14 @@ function situazioneRate(persona, pagamenti, oggi = oggiISO()) {
 }
 
 // ---- Percorsi (personal trainer / nutrizione) ----------------------------------------
-const TIPI_PERCORSO = ['nutrizione', 'personal', 'personal_nutrizione', 'trattamento', 'ristrutturazione_edile'];
+// Tipi di base (i codici 'personal' e 'personal_nutrizione' restano per i percorsi già salvati).
+// Oltre a questi ogni cliente può avere tipi scritti a mano: in quel caso il tipo è il testo stesso.
+const NOMI_PERCORSO = {
+  nutrizione: 'Nutrizione', personal: 'Allenamento', personal_nutrizione: 'Nutrizione + Allenamento',
+  trattamento: 'Trattamento', ristrutturazione_edile: 'Ristrutturazione edile'
+};
+const TIPI_PERCORSO = Object.keys(NOMI_PERCORSO);
+const nomePercorso = (tipo) => NOMI_PERCORSO[tipo] || tipo || '';
 const MODALITA = ['unica', 'rate'];
 
 const toUTC = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)); };
@@ -281,7 +288,7 @@ function tutteLeRate(persone, percorsi, pagamenti, oggi = oggiISO()) {
 }
 
 module.exports = {
-  FREQUENZE, TIPI_PERCORSO, MODALITA, oggiISO, addMonths, lastDay, iso,
+  FREQUENZE, TIPI_PERCORSO, NOMI_PERCORSO, nomePercorso, MODALITA, oggiISO, addMonths, lastDay, iso,
   periodiAttesi, situazioneRate, finePercorso, primaScadenzaPredefinita, pianoRate,
   situazionePercorso, situazioneCompleta, statisticheAppuntamenti, riepilogoPersone, tutteLeRate
 };

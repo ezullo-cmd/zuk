@@ -1,4 +1,4 @@
-/* global api, SECTIONS, statoPromemoria, $, esc, eur, toast, safe, fmtDate, fmtDateTime, periodoLabel, registraPagamento, label, TIPI_PERCORSO, METODI */
+/* global api, SECTIONS, statoPromemoria, $, esc, eur, toast, safe, fmtDate, fmtDateTime, periodoLabel, registraPagamento, label, nomeTipo, METODI */
 'use strict';
 
 // ---------- Sezione "Pagamenti e rate": registro di tutte le rate --------------
@@ -102,7 +102,7 @@ SECTIONS.pagamenti = {
                   else if (r.ricevuta_mancante) fattura = `<button class="btn small warn-btn" data-r-upload="${i}">Carica contabile</button>`;
                   return `<tr class="${r.stato === 'in_ritardo' ? 'row-late' : ''} ${r.persona.stato === 'cessato' ? 'row-muted' : ''}">
                     <td><a class="link" data-open-persona="${r.persona.id}"><strong>${esc(r.persona.cognome)} ${esc(r.persona.nome)}</strong></a></td>
-                    <td>${r.tipo_percorso ? esc(label(TIPI_PERCORSO, r.tipo_percorso)) : '<span class="muted">—</span>'}</td>
+                    <td>${r.tipo_percorso ? esc(nomeTipo(r.tipo_percorso)) : '<span class="muted">—</span>'}</td>
                     <td>${esc(periodoLabel(r))}${pag?.note ? `<div class="muted small">${esc(pag.note)}</div>` : ''}</td>
                     <td>${r.scadenza ? fmtDate(r.scadenza) : '—'}</td>
                     <td class="num">${r.importo !== null && r.importo !== undefined ? eur(r.importo) : '—'}</td>

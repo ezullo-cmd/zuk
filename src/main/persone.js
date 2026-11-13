@@ -2,7 +2,7 @@
 // calcolo delle rate e dei ritardi, storico appuntamenti, ricevute e documenti PDF.
 const db = require('./db');
 const {
-  FREQUENZE, TIPI_PERCORSO, MODALITA, oggiISO, periodiAttesi, situazioneRate, finePercorso,
+  FREQUENZE, TIPI_PERCORSO, NOMI_PERCORSO, MODALITA, oggiISO, periodiAttesi, situazioneRate, finePercorso,
   primaScadenzaPredefinita, pianoRate, situazionePercorso, situazioneCompleta, statisticheAppuntamenti,
   riepilogoPersone, tutteLeRate
 } = require('../../portal/lib/calcoli');
@@ -181,8 +181,36 @@ async function validaCanale(clienteId, id, dati) {
   }
 }
 
+/** Tipo di percorso: uno di base oppure un testo libero (max 60 caratteri). */
+function normalizzaTipo(tipo) {
+  const t = String(tipo || '').trim().replace(/\s+/g, ' ');
+  if (!t) throw new Error('Indica il tipo di percorso');
+  if (TIPI_PERCORSO.includes(t)) return t;
+  if (t.length > 60) throw new Error('Il tipo di percorso può avere al massimo 60 caratteri');
+  // se coincide con un tipo di base (es. "allenamento") si usa quello
+  const base = Object.entries(NOMI_PERCORSO).find(([, nome]) => nome.toLowerCase() === t.toLowerCase());
+  return base ? base[0] : t;
+}
+
+/** Tipi scritti a mano per questo cliente (da mostrare tra quelli selezionabili). */
+async function tipiPercorso(clienteId) {
+  const pool = await db.poolForCliente(clienteId);
+  const { rows } = await pool.query(
+    `SELECT nome FROM tipi_percorso
+      UNION SELECT DISTINCT tipo FROM percorsi WHERE NOT (tipo = ANY($1))
+      ORDER BY 1`, [TIPI_PERCORSO]
+  );
+  return rows.map((r) => r.nome);
+}
+
+async function rimuoviTipoPercorso(clienteId, nome) {
+  const pool = await db.poolForCliente(clienteId);
+  await pool.query('DELETE FROM tipi_percorso WHERE nome = $1', [nome]);
+  return true;
+}
+
 function validaPercorso(d) {
-  if (!TIPI_PERCORSO.includes(d.tipo)) throw new Error('Tipo di percorso non valido');
+  d = { ...d, tipo: normalizzaTipo(d.tipo) };
   if (!MODALITA.includes(d.modalita)) throw new Error('Modalità di pagamento non valida');
   if (!d.data_inizio) throw new Error('Indica la data di inizio del percorso');
   if (!(Number(d.durata_mesi) > 0)) throw new Error('Indica la durata del percorso');
@@ -215,12 +243,17 @@ async function salvaPercorso(clienteId, id, data) {
       'SELECT count(*)::int AS n FROM pagamenti WHERE percorso_id = $1 AND numero_rata > $2', [id, d.numero_rate]
     );
     if (rows[0].n) throw new Error('Ci sono pagamenti registrati su rate che verrebbero eliminate: annullali prima di ridurre le rate');
-    return db.update(clienteId, 'percorsi', id, d);
   }
-  return db.create(clienteId, 'percorsi', d);
+  // un tipo nuovo scritto a mano diventa selezionabile dalla volta successiva
+  if (!TIPI_PERCORSO.includes(d.tipo)) {
+    const pool = await db.poolForCliente(clienteId);
+    await pool.query('INSERT INTO tipi_percorso (nome) VALUES ($1) ON CONFLICT (nome) DO NOTHING', [d.tipo]);
+  }
+  return id ? db.update(clienteId, 'percorsi', id, d) : db.create(clienteId, 'percorsi', d);
 }
 
 module.exports = {
+  tipiPercorso, rimuoviTipoPercorso,
   FREQUENZE, periodiAttesi, situazioneRate, statisticheAppuntamenti,
   finePercorso, pianoRate, situazionePercorso, anteprimaPercorso, primaScadenzaPredefinita,
   listPersone, listRate, dettaglioPersona, salvaPersona, salvaPercorso, salvaPagamento,

@@ -155,7 +155,7 @@ VISTE.home = async () => {
     if (d.daRinnovare.length)
       html += `<div class="panel"><h3>Percorsi da rinnovare</h3><div class="list">${d.daRinnovare
         .map((p) => `<div class="row click" data-persona="${p.id}"><div class="grow"><strong>${esc(p.cognome)} ${esc(p.nome)}</strong>
-          <div class="muted small">${esc(TIPI[p.percorso?.tipo] || '')}</div></div><div class="right"><span class="badge b-warn">termina il ${data(p.percorso?.fine)}</span></div></div>`)
+          <div class="muted small">${esc(TIPI[p.percorso?.tipo] || p.percorso?.tipo || '')}</div></div><div class="right"><span class="badge b-warn">termina il ${data(p.percorso?.fine)}</span></div></div>`)
         .join('')}</div></div>`;
   }
   if (d.prossimi)
@@ -206,7 +206,7 @@ VISTE.anagrafica = async (v) => {
                 return `<div class="row click ${p.situazione.inRitardo.length ? 'late' : ''}" data-persona="${p.id}">
                   <div class="grow"><strong>${esc(p.cognome)} ${esc(p.nome)}</strong>
                     ${p.situazione.numRinnovi ? ' <span class="badge b-purple">↻ rinnovato</span>' : ''}
-                    <div class="muted small">${pa ? `${esc(TIPI[pa.tipo] || '')} · fino al ${data(pa.fine)}` : 'Nessun percorso'}
+                    <div class="muted small">${pa ? `${esc(TIPI[pa.tipo] || pa.tipo || '')} · fino al ${data(pa.fine)}` : 'Nessun percorso'}
                       ${p.situazione.daRinnovare ? ' · <span class="late-text">da rinnovare</span>' : ''}</div></div>
                   <div class="right">${badgeRate(p.situazione)}</div></div>`;
               })
@@ -345,7 +345,7 @@ VISTE.pagamenti = async () => {
         l.length
           ? l.map((r) => `<div class="row ${r.stato === 'in_ritardo' ? 'late' : ''}">
               <div class="grow"><strong class="click" data-persona="${r.persona.id}">${esc(r.persona.cognome)} ${esc(r.persona.nome)}</strong>
-                <div class="muted small">${esc(etichettaRata(r))}${r.tipo_percorso ? ' · ' + esc(TIPI[r.tipo_percorso] || '') : ''}${r.scadenza ? ' · scad. ' + data(r.scadenza) : ''}
+                <div class="muted small">${esc(etichettaRata(r))}${r.tipo_percorso ? ' · ' + esc(TIPI[r.tipo_percorso] || r.tipo_percorso) : ''}${r.scadenza ? ' · scad. ' + data(r.scadenza) : ''}
                   ${r.pagamento && !r.pagamento.esente ? ' · pagata il ' + data(r.pagamento.pagato_il) : ''}</div>
                 ${r.pagamento?.documento_id ? `<a class="small" href="/api/documento?id=${r.pagamento.documento_id}" target="_blank" rel="noopener">📄 Contabile</a>` : ''}</div>
               <div class="right">${r.importo !== null && r.importo !== undefined ? `<div>${eur(r.importo)}</div>` : ''}${STATO_RATA[r.stato] || ''}</div></div>`).join('')

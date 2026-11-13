@@ -67,7 +67,9 @@ contextBridge.exposeInMainWorld('api', {
   },
   percorsi: {
     save: (clienteId, id, data) => call('percorsi:save', clienteId, id, data),
-    anteprima: (data) => call('percorsi:anteprima', data)
+    anteprima: (data) => call('percorsi:anteprima', data),
+    tipi: (clienteId) => call('percorsi:tipi', clienteId),
+    rimuoviTipo: (clienteId, nome) => call('percorsi:rimuoviTipo', clienteId, nome)
   },
   pagamenti: {
     save: (clienteId, data, file) => call('pagamenti:save', clienteId, data, file)
