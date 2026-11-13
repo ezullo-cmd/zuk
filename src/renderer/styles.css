@@ -212,3 +212,16 @@ label.inline input { padding: 6px 8px; }
 .image-preview img { width: 100%; height: 100%; object-fit: contain; }
 .image-actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .image-actions label.btn { color: var(--text); font-size: 12px; flex-direction: row; }
+
+/* ---- Promemoria ---- */
+.promemoria-panel.off { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; background: #fafbfc; }
+.prom-row { display: grid; grid-template-columns: 28px 1fr auto; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); align-items: start; }
+.prom-row:first-of-type { border-top: none; }
+.prom-row.errore { background: var(--late-bg); }
+.prom-icon { font-size: 18px; }
+.prom-testo { background: #f6f8fb; border-radius: 8px; padding: 6px 10px; margin-top: 4px; font-size: 13px; white-space: pre-wrap; }
+.prom-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.wa-btn { background: #25d366; border-color: #25d366; color: #fff; }
+.wa-btn:hover { background: #1ebe5b; }
+details summary { cursor: pointer; margin-top: 10px; }
+code { background: #f1f3f6; padding: 1px 4px; border-radius: 4px; font-size: 12px; }

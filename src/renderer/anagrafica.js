@@ -42,6 +42,10 @@ const PERSONA_FIELDS = [
   { name: 'codice_fiscale', label: 'Codice fiscale' },
   { name: 'indirizzo', label: 'Indirizzo' },
   { name: 'contatto_emergenza', label: 'Contatto di emergenza (nome e telefono)', full: true },
+  {
+    name: 'canale_comunicazione', label: 'Invia le comunicazioni (promemoria rate) via', type: 'select', required: true, full: true,
+    options: [['', '— Scegli —'], ['telefono', 'Telefono (WhatsApp)'], ['email', 'Email']]
+  },
 
   { type: 'heading', label: 'Allenamento e salute' },
   { name: 'obiettivo', label: 'Obiettivo', full: true },
@@ -295,6 +299,7 @@ async function renderPersona(cliente, el, personaId) {
 
   const info = [
     ['Telefono', p.telefono], ['Email', p.email], ['Data di nascita', p.data_nascita && `${fmtDate(p.data_nascita)} (${eta(p.data_nascita)} anni)`],
+    ['Comunicazioni', p.canale_comunicazione === 'email' ? `Email · ${p.email || '⚠ manca l’indirizzo'}` : p.canale_comunicazione === 'telefono' ? `WhatsApp · ${p.telefono || '⚠ manca il numero'}` : '⚠ Canale non scelto'],
     ['Codice fiscale', p.codice_fiscale], ['Indirizzo', p.indirizzo], ['Contatto di emergenza', p.contatto_emergenza],
     ['Obiettivo', p.obiettivo], ['Livello', p.livello], ['Altezza', p.altezza_cm && `${p.altezza_cm} cm`], ['Peso iniziale', p.peso_kg && `${p.peso_kg} kg`],
     ['Certificato medico', p.certificato_scadenza && `scade il ${fmtDate(p.certificato_scadenza)}${d.certificatoScaduto ? ' — SCADUTO' : ''}`],

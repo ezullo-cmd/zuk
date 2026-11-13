@@ -406,11 +406,30 @@ async function salvaPersona(clienteId, id, data) {
   if (dati.tipo_pagamento && dati.tipo_pagamento !== 'percorso' && !(dati.tipo_pagamento in FREQUENZE))
     throw new Error('Tipo di pagamento non valido');
   if (!id && !dati.tipo_pagamento) dati.tipo_pagamento = 'percorso';
+  await validaCanale(clienteId, id, dati);
   if (!id && percorso && !dati.data_inizio) dati.data_inizio = percorso.data_inizio;
   if (percorso) validaPercorso(percorso);
   const saved = id ? await db.update(clienteId, 'persone', id, dati) : await db.create(clienteId, 'persone', dati);
   if (percorso) await salvaPercorso(clienteId, null, { ...percorso, persona_id: saved.id });
   return saved;
+}
+
+// Il canale scelto per le comunicazioni deve avere il recapito compilato
+async function validaCanale(clienteId, id, dati) {
+  let attuale = {};
+  if (id) {
+    const pool = await db.poolForCliente(clienteId);
+    attuale = (await pool.query('SELECT telefono, email, canale_comunicazione FROM persone WHERE id = $1', [id])).rows[0] || {};
+  }
+  const v = { ...attuale, ...dati };
+  if (!id && !v.canale_comunicazione) throw new Error('Scegli se inviare le comunicazioni via telefono o via email');
+  if (v.canale_comunicazione && !['telefono', 'email'].includes(v.canale_comunicazione)) throw new Error('Canale non valido');
+  if (v.canale_comunicazione === 'telefono' && !String(v.telefono || '').trim())
+    throw new Error('Hai scelto le comunicazioni via telefono: inserisci il numero di telefono');
+  if (v.canale_comunicazione === 'email') {
+    if (!String(v.email || '').trim()) throw new Error('Hai scelto le comunicazioni via email: inserisci l\'indirizzo email');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email.trim())) throw new Error('L\'indirizzo email non è valido');
+  }
 }
 
 function validaPercorso(d) {

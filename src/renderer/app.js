@@ -291,7 +291,7 @@ async function renderHome() {
     return;
   }
   content.innerHTML = '<h1>Home</h1><div class="subtitle">Caricamento…</div>';
-  const d = await safe(() => api.dashboard());
+  const [d, prom] = await Promise.all([safe(() => api.dashboard()), api.promemoria.daInviare().catch(() => [])]);
   content.innerHTML = `
     <h1>Home</h1>
     <div class="subtitle">${new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
@@ -321,6 +321,29 @@ async function renderHome() {
           </div>`
         : ''
     }
+    ${
+      prom.length
+        ? `<div class="panel promemoria-panel">
+            <h3>🔔 Promemoria da inviare <span class="count-late">${prom.length}</span></h3>
+            ${prom
+              .map(
+                (x) => `<div class="prom-row ${x.stato}">
+                  <div class="prom-icon">${x.canale === 'email' ? '✉️' : '💬'}</div>
+                  <div class="prom-body"><div><strong>${esc(x.cognome)} ${esc(x.nome)}</strong>
+                    <span class="muted">· ${esc(x.cliente_nome)} · scadenza ${fmtDate(x.scadenza)}</span></div>
+                    ${x.stato === 'errore' ? `<div class="late-days">Email non inviata: ${esc(x.errore)}</div>` : `<div class="prom-testo">${esc(x.testo)}</div>`}</div>
+                  <div class="prom-actions">${
+                    x.canale === 'whatsapp'
+                      ? `<button class="btn small wa-btn" data-home-wa="${x.cliente_id}:${x.id}">Invia su WhatsApp</button>
+                         <button class="btn small" data-home-ok="${x.cliente_id}:${x.id}">Segna come inviato</button>`
+                      : `<button class="btn small" data-cliente="${x.cliente_id}" data-tab="pagamenti">Apri</button>`
+                  }</div>
+                </div>`
+              )
+              .join('')}
+          </div>`
+        : ''
+    }
     <div class="panel">
       <h3>Prossimi appuntamenti</h3>
       <div class="list-appuntamenti">
@@ -341,6 +364,26 @@ async function renderHome() {
     </div>`;
 }
 
+// pulsanti promemoria nella Home
+document.addEventListener('click', async (e) => {
+  const wa = e.target.closest('[data-home-wa]');
+  const ok = e.target.closest('[data-home-ok]');
+  const b = wa || ok;
+  if (!b) return;
+  const [cid, id] = (wa ? b.dataset.homeWa : b.dataset.homeOk).split(':').map(Number);
+  if (wa) await safe(() => api.promemoria.whatsapp(cid, id));
+  else {
+    await safe(() => api.promemoria.segnaInviato(cid, id));
+    renderHome();
+  }
+});
+
+// quando il controllo automatico crea nuovi promemoria, aggiorna la pagina se è pertinente
+api.promemoria.onAggiornati((esito) => {
+  if (!esito || !(esito.email || esito.whatsapp || esito.errori)) return;
+  if (route.name === 'home' || (route.name === 'cliente' && route.tab === 'pagamenti')) go(route);
+});
+
 // ---------- Cliente ---------------------------------------------------------
 const CLIENTE_FIELDS = [
   { name: 'nome', label: 'Nome / Ragione sociale', required: true, full: true },
@@ -354,16 +397,82 @@ const CLIENTE_FIELDS = [
   {
     name: 'sezioni', label: 'Sezioni da mostrare nella pagina del cliente', type: 'multi', required: true,
     options: () => SEZIONI_ORDINE.map((k) => [k, SECTIONS[k].label, SECTIONS[k].descrizione])
-  }
+  },
+  { type: 'heading', label: 'Promemoria rate' },
+  { name: 'promemoria_attivi', label: 'Invia un promemoria 5 giorni lavorativi prima della scadenza di ogni rata', type: 'checkbox', full: true },
+  { name: 'promemoria_testo', label: 'Testo del promemoria', type: 'textarea' },
+  { name: 'segnaposto', type: 'html' },
+  { name: 'promemoria_oggetto', label: 'Oggetto dell\'email', full: true },
+  { type: 'heading', label: 'Invio email (per chi ha scelto le comunicazioni via email)' },
+  { name: 'smtp_user', label: 'Indirizzo email mittente' },
+  { name: 'smtp_password', label: 'Password (per Gmail: "password per le app")', type: 'password' },
+  { name: 'smtp_host', label: 'Server SMTP (es. smtp.gmail.com)' },
+  { name: 'smtp_port', label: 'Porta', type: 'number' },
+  { name: 'smtp_mittente', label: 'Nome mittente (es. Gianmarco Personal Trainer)' },
+  { name: 'smtp_secure', label: 'Connessione SSL (porta 465)', type: 'checkbox' },
+  { name: 'prova_email', type: 'html' }
 ];
 
-function editCliente(cliente) {
+const SMTP_NOTI = {
+  'gmail.com': ['smtp.gmail.com', 587], 'googlemail.com': ['smtp.gmail.com', 587],
+  'outlook.com': ['smtp-mail.outlook.com', 587], 'hotmail.com': ['smtp-mail.outlook.com', 587], 'hotmail.it': ['smtp-mail.outlook.com', 587],
+  'libero.it': ['smtp.libero.it', 465], 'yahoo.com': ['smtp.mail.yahoo.com', 465], 'yahoo.it': ['smtp.mail.yahoo.com', 465],
+  'aruba.it': ['smtps.aruba.it', 465], 'icloud.com': ['smtp.mail.me.com', 587]
+};
+
+const smtpDaForm = (d) => ({
+  host: d.smtp_host, port: Number(d.smtp_port) || 587, secure: !!d.smtp_secure,
+  user: d.smtp_user, password: d.smtp_password, mittente: d.smtp_mittente
+});
+
+async function editCliente(cliente) {
   const fields = CLIENTE_FIELDS.map((f) => (typeof f.options === 'function' ? { ...f, options: f.options() } : f));
+  const def = await api.promemoria.defaults();
+  const smtp = cliente?.smtp || {};
   openForm({
     title: cliente ? 'Modifica cliente' : 'Nuovo cliente',
     fields,
-    values: cliente || { colore: PALETTE[clienti.length % PALETTE.length], sezioni: [] },
-    onSubmit: async (data) => {
+    values: {
+      ...(cliente || { colore: PALETTE[clienti.length % PALETTE.length], sezioni: [] }),
+      promemoria_testo: cliente?.promemoria_testo || def.testo,
+      promemoria_oggetto: cliente?.promemoria_oggetto || def.oggetto,
+      smtp_host: smtp.host || '', smtp_port: smtp.port || 587, smtp_secure: !!smtp.secure,
+      smtp_user: smtp.user || '', smtp_password: smtp.password || '', smtp_mittente: smtp.mittente || ''
+    },
+    onInput: (v, form) => {
+      const seg = $('#segnaposto');
+      if (!seg.innerHTML)
+        seg.innerHTML = `<div class="muted small">Puoi usare: <code>&lt;nome&gt;</code> <code>&lt;cognome&gt;</code> <code>&lt;data di scadenza&gt;</code>
+          <code>&lt;tipo percorso&gt;</code> <code>&lt;importo&gt;</code> <code>&lt;numero rata&gt;</code>
+          · <a class="link" id="testo-default">ripristina testo predefinito</a></div>`;
+      $('#testo-default').onclick = () => { form.elements.promemoria_testo.value = def.testo; };
+      // compila server e porta per i provider più comuni
+      const dominio = (v.smtp_user.split('@')[1] || '').toLowerCase();
+      if (SMTP_NOTI[dominio] && !form.elements.smtp_host.value) {
+        form.elements.smtp_host.value = SMTP_NOTI[dominio][0];
+        form.elements.smtp_port.value = SMTP_NOTI[dominio][1];
+        form.elements.smtp_secure.checked = SMTP_NOTI[dominio][1] === 465;
+      }
+      const prova = $('#prova_email');
+      if (!prova.innerHTML) {
+        prova.innerHTML = '<button type="button" class="btn small" id="btn-prova-email">Invia email di prova a me stesso</button>';
+        $('#btn-prova-email').onclick = async () => {
+          const d = Object.fromEntries([...new FormData(form)].map(([k, x]) => [k, x]));
+          d.smtp_secure = form.elements.smtp_secure.checked;
+          if (!d.smtp_user) return toast('Inserisci l\'indirizzo email mittente', true);
+          toast('Invio in corso…');
+          try {
+            await api.promemoria.prova(smtpDaForm(d), d.smtp_user);
+            toast(`Email di prova inviata a ${d.smtp_user}`);
+          } catch (e) {
+            toast('Invio non riuscito: ' + e.message, true);
+          }
+        };
+      }
+    },
+    onSubmit: async (d) => {
+      const data = Object.fromEntries(Object.entries(d).filter(([k]) => !k.startsWith('smtp_')));
+      data.smtp = d.smtp_host ? smtpDaForm(d) : null;
       const saved = cliente ? await api.clienti.update(cliente.id, data) : await api.clienti.create(data);
       toast(cliente ? 'Cliente aggiornato' : 'Cliente creato (database dedicato pronto)');
       await loadClienti();

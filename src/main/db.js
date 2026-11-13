@@ -87,7 +87,12 @@ const MASTER_MIGRATIONS = [
   `ALTER TABLE clienti ADD COLUMN colore TEXT NOT NULL DEFAULT '#2f6fed';
    ALTER TABLE clienti ADD COLUMN sezioni JSONB NOT NULL DEFAULT '["appuntamenti","fatture","acquisti"]'`,
   // v3: logo del cliente (immagine ridimensionata, salvata come data URL)
-  `ALTER TABLE clienti ADD COLUMN logo TEXT`
+  `ALTER TABLE clienti ADD COLUMN logo TEXT`,
+  // v4: promemoria delle rate (testo personalizzabile, invio email via SMTP del cliente)
+  `ALTER TABLE clienti ADD COLUMN promemoria_attivi BOOLEAN NOT NULL DEFAULT false;
+   ALTER TABLE clienti ADD COLUMN promemoria_testo TEXT;
+   ALTER TABLE clienti ADD COLUMN promemoria_oggetto TEXT;
+   ALTER TABLE clienti ADD COLUMN smtp JSONB`
 ];
 
 const CLIENT_MIGRATIONS = [
@@ -192,7 +197,24 @@ const CLIENT_MIGRATIONS = [
    ALTER TABLE pagamenti ADD CONSTRAINT pagamenti_rata_unica UNIQUE (percorso_id, numero_rata);
    ALTER TABLE persone ALTER COLUMN tipo_pagamento SET DEFAULT 'percorso';`,
   // v4: un percorso può essere il rinnovo di un percorso precedente
-  `ALTER TABLE percorsi ADD COLUMN rinnovo_di INT REFERENCES percorsi(id) ON DELETE SET NULL;`
+  `ALTER TABLE percorsi ADD COLUMN rinnovo_di INT REFERENCES percorsi(id) ON DELETE SET NULL;`,
+  // v5: canale delle comunicazioni e registro dei promemoria inviati
+  `ALTER TABLE persone ADD COLUMN canale_comunicazione TEXT;
+   CREATE TABLE promemoria (
+     id           SERIAL PRIMARY KEY,
+     chiave       TEXT NOT NULL UNIQUE,
+     persona_id   INT NOT NULL REFERENCES persone(id) ON DELETE CASCADE,
+     percorso_id  INT REFERENCES percorsi(id) ON DELETE CASCADE,
+     numero_rata  INT,
+     scadenza     DATE NOT NULL,
+     canale       TEXT NOT NULL,
+     destinatario TEXT,
+     testo        TEXT NOT NULL,
+     stato        TEXT NOT NULL DEFAULT 'da_inviare',
+     errore       TEXT,
+     creato_il    TIMESTAMPTZ NOT NULL DEFAULT now(),
+     inviato_il   TIMESTAMPTZ
+   );`
 ];
 
 async function migrate(pool, migrations) {
@@ -254,7 +276,10 @@ async function poolForCliente(clienteId) {
 
 // ---- Clienti (DB master) ------------------------------------------------------
 
-const CLIENTE_FIELDS = ['nome', 'email', 'telefono', 'partita_iva', 'indirizzo', 'note', 'colore', 'sezioni', 'logo'];
+const CLIENTE_FIELDS = [
+  'nome', 'email', 'telefono', 'partita_iva', 'indirizzo', 'note', 'colore', 'sezioni', 'logo',
+  'promemoria_attivi', 'promemoria_testo', 'promemoria_oggetto', 'smtp'
+];
 
 // Sezioni che si possono attivare nella pagina di un cliente
 const SEZIONI = ['anagrafica', 'appuntamenti', 'servizi', 'pagamenti', 'fatture', 'acquisti'];
@@ -269,6 +294,12 @@ function clienteValue(field, value) {
     if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(value)) throw new Error('Logo non valido');
     if (value.length > 2_000_000) throw new Error('Logo troppo grande');
     return value;
+  }
+  if (field === 'promemoria_attivi') return !!value;
+  if (field === 'smtp') {
+    if (!value || !value.host) return null;
+    const { host, port, secure, user, password, mittente } = value;
+    return JSON.stringify({ host: String(host).trim(), port: Number(port) || 587, secure: !!secure, user, password, mittente });
   }
   if (field === 'sezioni') {
     const list = (Array.isArray(value) ? value : []).filter((s) => SEZIONI.includes(s));
@@ -343,7 +374,7 @@ const TABLES = {
       'nome', 'cognome', 'data_nascita', 'sesso', 'codice_fiscale', 'telefono', 'email', 'indirizzo',
       'contatto_emergenza', 'obiettivo', 'livello', 'condizioni_salute', 'certificato_scadenza',
       'altezza_cm', 'peso_kg', 'stato', 'data_inizio', 'data_fine', 'tipo_pagamento', 'importo',
-      'metodo_pagamento', 'note'
+      'metodo_pagamento', 'note', 'canale_comunicazione'
     ],
     order: 'cognome, nome'
   },

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Notification } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -6,6 +6,7 @@ const log = require('electron-log');
 const config = require('./config');
 const db = require('./db');
 const persone = require('./persone');
+const promemoria = require('./promemoria');
 const { setupUpdater } = require('./updater');
 
 log.initialize();
@@ -69,6 +70,20 @@ function registerIpc() {
   handle('records:delete', (clienteId, table, id) => db.remove(clienteId, table, id));
 
   handle('persone:list', (clienteId) => persone.listPersone(clienteId));
+  handle('promemoria:default', () => ({ testo: promemoria.TESTO_DEFAULT, oggetto: promemoria.OGGETTO_DEFAULT }));
+  handle('promemoria:list', (clienteId) => promemoria.elenco(clienteId));
+  handle('promemoria:daInviare', () => promemoria.daInviareTutti());
+  handle('promemoria:check', () => controllaPromemoria());
+  handle('promemoria:inviato', (clienteId, id) => promemoria.segnaInviato(clienteId, id));
+  handle('promemoria:riprova', (clienteId, id) => promemoria.riprova(clienteId, id));
+  handle('promemoria:delete', (clienteId, id) => promemoria.eliminaPromemoria(clienteId, id));
+  handle('promemoria:prova', (smtp, a) => promemoria.emailDiProva(smtp, a));
+  handle('promemoria:whatsapp', async (clienteId, id) => {
+    const r = (await promemoria.elenco(clienteId)).find((x) => x.id === id);
+    if (!r?.link) throw new Error('Numero di telefono non valido per WhatsApp');
+    await shell.openExternal(r.link);
+    return true;
+  });
   handle('rate:list', (clienteId) => persone.listRate(clienteId));
   handle('persone:get', (clienteId, id) => persone.dettaglioPersona(clienteId, id));
   handle('persone:save', (clienteId, id, data) => persone.salvaPersona(clienteId, id, data));
@@ -88,6 +103,32 @@ function registerIpc() {
   });
 }
 
+// Controllo promemoria: all'avvio e ogni ora (finché l'app è aperta)
+let controlloInCorso = false;
+async function controllaPromemoria() {
+  if (!db.isReady() || controlloInCorso) return null;
+  controlloInCorso = true;
+  try {
+    const esito = await promemoria.controllaTutti();
+    const msg = [];
+    if (esito.email) msg.push(`${esito.email} email inviate`);
+    if (esito.whatsapp) msg.push(`${esito.whatsapp} WhatsApp da inviare`);
+    if (esito.errori) msg.push(`${esito.errori} email non inviate (errore)`);
+    if (msg.length && Notification.isSupported()) {
+      const n = new Notification({ title: 'Promemoria rate', body: msg.join(' · ') });
+      n.on('click', () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } });
+      n.show();
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('promemoria:aggiornati', esito);
+    return esito;
+  } catch (e) {
+    log.warn('Controllo promemoria fallito:', e.message);
+    return null;
+  } finally {
+    controlloInCorso = false;
+  }
+}
+
 app.whenReady().then(async () => {
   registerIpc();
   try {
@@ -97,6 +138,8 @@ app.whenReady().then(async () => {
   }
   createWindow();
   setupUpdater(() => mainWindow);
+  setTimeout(controllaPromemoria, 15000);
+  setInterval(controllaPromemoria, 60 * 60 * 1000);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

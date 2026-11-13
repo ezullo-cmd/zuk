@@ -1,4 +1,4 @@
-/* global api, SECTIONS, $, esc, eur, toast, safe, fmtDate, periodoLabel, registraPagamento, label, TIPI_PERCORSO, METODI */
+/* global api, SECTIONS, $, esc, eur, toast, safe, fmtDate, fmtDateTime, periodoLabel, registraPagamento, label, TIPI_PERCORSO, METODI */
 'use strict';
 
 // ---------- Sezione "Pagamenti e rate": registro di tutte le rate --------------
@@ -11,7 +11,12 @@ SECTIONS.pagamenti = {
   label: 'Pagamenti e rate',
   descrizione: 'Rate pagate, contabili PDF e ritardi',
   render: async function renderPagamenti(cliente, el) {
-    const { oggi, rate } = await safe(() => api.rate.list(cliente.id));
+    const [{ oggi, rate }, prom] = await Promise.all([
+      safe(() => api.rate.list(cliente.id)),
+      api.promemoria.list(cliente.id).catch(() => [])
+    ]);
+    const promPerRata = new Map(prom.map((x) => [x.chiave, x]));
+    const chiaveRata = (r) => (r.percorso_id ? `perc-${r.percorso_id}-${r.numero_rata}` : `abb-${r.persona.id}-${r.periodo}`);
     const meseCorrente = oggi.slice(0, 7);
 
     // riepilogo
@@ -54,6 +59,8 @@ SECTIONS.pagamenti = {
           <div class="value">${senzaFattura.length}</div><div class="muted">PDF da caricare</div></div>
       </div>
 
+      ${pannelloPromemoria(cliente, prom)}
+
       <div class="toolbar">
         <input id="f-rate" class="search-input" placeholder="Cerca persona…" value="${esc(filtroRate.testo)}">
         <div class="segmented">
@@ -85,6 +92,11 @@ SECTIONS.pagamenti = {
                     da_pagare: `<span class="badge da_pagare">Da pagare</span>${r.scadenza ? `<div class="muted small">tra ${giorniTra(oggi, r.scadenza)} gg</div>` : ''}`,
                     in_ritardo: `<span class="badge late">⚠ In ritardo</span><div class="late-days">${ritardoGg} ${ritardoGg === 1 ? 'giorno' : 'giorni'}</div>`
                   }[r.stato];
+                  const pr = promPerRata.get(chiaveRata(r));
+                  if (pr && r.stato !== 'pagata' && r.stato !== 'esente')
+                    stato += `<div class="small ${pr.stato === 'errore' ? 'late-days' : 'muted'}">🔔 ${
+                      pr.stato === 'inviato' ? `promemoria inviato il ${fmtDate(pr.inviato_il)}` : pr.stato === 'errore' ? 'promemoria non inviato' : 'promemoria da inviare'
+                    }</div>`;
                   let fattura = '';
                   if (pag?.documento_id) fattura = `<a class="link" data-doc-open="${pag.documento_id}">📄 Apri</a>`;
                   else if (r.ricevuta_mancante) fattura = `<button class="btn small warn-btn" data-r-upload="${i}">Carica contabile</button>`;
@@ -147,6 +159,76 @@ SECTIONS.pagamenti = {
       aggiornaRitardi();
       refresh();
     }));
+    collegaPromemoria(el, cliente, refresh);
     el.querySelectorAll('[data-doc-open]').forEach((a) => (a.onclick = () => safe(() => api.documenti.open(cliente.id, Number(a.dataset.docOpen)))));
   }
 };
+
+// ---------- Promemoria rate ---------------------------------------------------
+
+function pannelloPromemoria(cliente, prom) {
+  if (!cliente.promemoria_attivi)
+    return `<div class="panel promemoria-panel off"><strong>🔔 Promemoria rate disattivati.</strong>
+      <span class="muted">Attivali da “Modifica” in alto: verrà inviato un messaggio 5 giorni lavorativi prima di ogni scadenza.</span></div>`;
+  const aperti = prom.filter((x) => x.stato !== 'inviato');
+  const inviati = prom.filter((x) => x.stato === 'inviato').slice(0, 8);
+  const riga = (x) => `<div class="prom-row ${x.stato}">
+      <div class="prom-icon">${x.canale === 'email' ? '✉️' : '💬'}</div>
+      <div class="prom-body">
+        <div><a class="link" data-open-persona="${x.persona_id}"><strong>${esc(x.cognome)} ${esc(x.nome)}</strong></a>
+          <span class="muted">· rata in scadenza il ${fmtDate(x.scadenza)} · ${x.canale === 'email' ? 'email' : 'WhatsApp'} ${esc(x.destinatario || '')}</span></div>
+        <div class="prom-testo">${esc(x.testo)}</div>
+        ${x.stato === 'errore' ? `<div class="late-days">Errore: ${esc(x.errore)}</div>` : ''}
+        ${x.stato === 'inviato' ? `<div class="muted small">Inviato il ${fmtDateTime(x.inviato_il)}</div>` : ''}
+      </div>
+      <div class="prom-actions">${
+        x.stato === 'inviato'
+          ? ''
+          : x.canale === 'whatsapp'
+            ? `<button class="btn small wa-btn" data-prom-wa="${x.id}">Invia su WhatsApp</button>
+               <button class="btn small" data-prom-ok="${x.id}">Segna come inviato</button>`
+            : `<button class="btn small primary" data-prom-retry="${x.id}">Riprova</button>
+               <button class="btn small" data-prom-ok="${x.id}">Segna come inviato</button>`
+      }<button class="btn small ghost" data-prom-del="${x.id}" title="Rimuovi">✕</button></div>
+    </div>`;
+  return `<div class="panel promemoria-panel">
+    <div class="panel-head">
+      <h3>🔔 Promemoria rate ${aperti.length ? `<span class="count-late">${aperti.length}</span>` : ''}</h3>
+      <button class="btn small" id="btn-prom-check">Controlla ora</button>
+    </div>
+    ${aperti.length ? aperti.map(riga).join('') : '<div class="muted">Nessun promemoria da inviare. Partono da soli 5 giorni lavorativi prima di ogni scadenza.</div>'}
+    ${inviati.length ? `<details><summary class="muted">Inviati di recente (${inviati.length})</summary>${inviati.map(riga).join('')}</details>` : ''}
+  </div>`;
+}
+
+function collegaPromemoria(el, cliente, refresh) {
+  const btn = el.querySelector('#btn-prom-check');
+  if (btn)
+    btn.onclick = async () => {
+      btn.disabled = true;
+      const e = await safe(() => api.promemoria.check()).finally(() => (btn.disabled = false));
+      toast(e && (e.email || e.whatsapp || e.errori) ? `Email inviate: ${e.email} · WhatsApp da inviare: ${e.whatsapp} · Errori: ${e.errori}` : 'Nessun nuovo promemoria');
+      refresh();
+    };
+  el.querySelectorAll('[data-prom-wa]').forEach((b) => (b.onclick = () => safe(() => api.promemoria.whatsapp(cliente.id, Number(b.dataset.promWa)))));
+  el.querySelectorAll('[data-prom-ok]').forEach((b) => (b.onclick = async () => {
+    await safe(() => api.promemoria.segnaInviato(cliente.id, Number(b.dataset.promOk)));
+    refresh();
+  }));
+  el.querySelectorAll('[data-prom-retry]').forEach((b) => (b.onclick = async () => {
+    b.disabled = true;
+    try {
+      await api.promemoria.riprova(cliente.id, Number(b.dataset.promRetry));
+      toast('Email inviata');
+    } catch (e) {
+      toast('Invio non riuscito: ' + e.message, true);
+    }
+    refresh();
+  }));
+  el.querySelectorAll('[data-prom-del]').forEach((b) => (b.onclick = async () => {
+    if (!confirm('Rimuovere questo promemoria? Non verrà ricreato per la stessa rata.')) return;
+    // lo segniamo come inviato così il controllo automatico non lo ricrea
+    await safe(() => api.promemoria.segnaInviato(cliente.id, Number(b.dataset.promDel)));
+    refresh();
+  }));
+}
