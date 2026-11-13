@@ -93,7 +93,7 @@ function situazioneRate(persona, pagamenti, oggi = oggiISO()) {
 }
 
 // ---- Percorsi (personal trainer / nutrizione) ----------------------------------------
-const TIPI_PERCORSO = ['personal', 'nutrizione', 'personal_nutrizione'];
+const TIPI_PERCORSO = ['nutrizione', 'personal', 'personal_nutrizione', 'trattamento', 'ristrutturazione_edile'];
 const MODALITA = ['unica', 'rate'];
 
 const toUTC = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)); };

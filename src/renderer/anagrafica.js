@@ -19,7 +19,8 @@ const METODI = [['', '—'], ['contanti', 'Contanti'], ['bonifico', 'Bonifico'],
 const STATI_PERSONA = [['attivo', 'Attivo'], ['sospeso', 'Sospeso'], ['cessato', 'Cessato']];
 const ACCEPT_DOC = 'application/pdf,image/*';
 
-const TIPI_PERCORSO = [['personal', 'Personal trainer'], ['nutrizione', 'Nutrizione'], ['personal_nutrizione', 'Personal trainer + Nutrizione']];
+// i codici 'personal' e 'personal_nutrizione' restano per compatibilità con i percorsi già salvati
+const TIPI_PERCORSO = [['nutrizione', 'Nutrizione'], ['personal', 'Allenamento'], ['personal_nutrizione', 'Nutrizione + Allenamento'], ['trattamento', 'Trattamento'], ['ristrutturazione_edile', 'Ristrutturazione edile']];
 const DURATE_MESI = [1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 18, 24].map((n) => [String(n), n === 1 ? '1 mese' : `${n} mesi`]);
 const NUM_RATE = Array.from({ length: 11 }, (_, i) => [String(i + 2), `${i + 2} rate`]);
 const STATI_PERCORSO = {

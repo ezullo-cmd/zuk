@@ -12,7 +12,7 @@ const GIORNI_PRIMA = 5;
 const TESTO_DEFAULT =
   'Salve <nome>, le ricordiamo che in data <data di scadenza> scadrà la prossima rata del percorso <tipo percorso>.';
 const OGGETTO_DEFAULT = 'Promemoria scadenza rata';
-const TIPI_PERCORSO = { personal: 'Personal trainer', nutrizione: 'Nutrizione', personal_nutrizione: 'Personal trainer + Nutrizione' };
+const TIPI_PERCORSO = { nutrizione: 'Nutrizione', personal: 'Allenamento', personal_nutrizione: 'Nutrizione + Allenamento', trattamento: 'Trattamento', ristrutturazione_edile: 'Ristrutturazione edile' };
 
 // ---- Data di invio: N giorni lavorativi prima della scadenza ----------------------
 const pad = (n) => String(n).padStart(2, '0');

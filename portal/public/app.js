@@ -7,7 +7,7 @@ const eur = (n) => new Intl.NumberFormat('it-IT', { style: 'currency', currency:
 const data = (d) => (d ? new Date(d.length === 10 ? d + 'T00:00:00' : d).toLocaleDateString('it-IT') : '');
 const dataOra = (d) => (d ? new Date(d).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }) : '');
 const mese = (p) => (p ? new Date(p + 'T00:00:00').toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }) : '');
-const TIPI = { personal: 'Personal trainer', nutrizione: 'Nutrizione', personal_nutrizione: 'Personal trainer + Nutrizione' };
+const TIPI = { nutrizione: 'Nutrizione', personal: 'Allenamento', personal_nutrizione: 'Nutrizione + Allenamento', trattamento: 'Trattamento', ristrutturazione_edile: 'Ristrutturazione edile' };
 const STATI_APP = { programmato: ['Programmato', 'b-blue'], svolto: ['Svolto', 'b-ok'], assente: ['Assente', 'b-late'], annullato: ['Annullato', 'b-grey'] };
 const content = $('#content');
 
