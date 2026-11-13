@@ -19,7 +19,15 @@ const toLocalInput = (d) => {
   return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}T${pad(x.getHours())}:${pad(x.getMinutes())}`;
 };
 const today = () => new Date().toISOString().slice(0, 10);
-const totaleFattura = (f) => Number(f.imponibile) * (1 + Number(f.iva_perc) / 100);
+// Colori proposti per i clienti
+const PALETTE = ['#2f6fed', '#0f9d8a', '#1f9d55', '#c98a12', '#e8590c', '#d64545', '#d6336c', '#7048e8', '#495057'];
+// Testo bianco o scuro a seconda della luminosità del colore di sfondo
+const textOn = (hex) => {
+  const n = parseInt(String(hex || '#2f6fed').slice(1), 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  return 0.299 * r + 0.587 * g + 0.114 * b > 170 ? '#1d2330' : '#ffffff';
+};
+const totaleFattura =(f) => Number(f.imponibile) * (1 + Number(f.iva_perc) / 100);
 
 let toastTimer;
 function toast(msg, isError = false) {
@@ -57,16 +65,46 @@ function openForm({ title, fields, values = {}, onSubmit }) {
           .join('')}</select>`;
       else if (f.type === 'checkbox')
         return `<label class="check ${cls}"><input type="checkbox" name="${f.name}" ${v ? 'checked' : ''}> ${esc(f.label)}</label>`;
+      else if (f.type === 'color')
+        return `<div class="field full"><span class="field-label">${esc(f.label)}</span>
+          <div class="color-picker">
+            ${PALETTE.map((c) => `<button type="button" class="swatch ${c === v ? 'selected' : ''}" data-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}
+            <label class="swatch custom" title="Altro colore"><input type="color" name="${f.name}" value="${esc(v || PALETTE[0])}"></label>
+          </div></div>`;
+      else if (f.type === 'multi')
+        return `<div class="field full"><span class="field-label">${esc(f.label)}</span>
+          <div class="multi-grid" data-multi="${f.name}">
+            ${f.options
+              .map(
+                ([val, lab, desc]) => `<label class="multi-option">
+                  <input type="checkbox" value="${esc(val)}" ${(v || []).includes(val) ? 'checked' : ''}>
+                  <span><strong>${esc(lab)}</strong>${desc ? `<small>${esc(desc)}</small>` : ''}</span>
+                </label>`
+              )
+              .join('')}
+          </div></div>`;
       else input = `<input name="${f.name}" type="${f.type || 'text'}" value="${esc(v)}" ${f.step ? `step="${f.step}"` : ''} ${req}>`;
       return `<label class="${cls}">${esc(f.label)}${input}</label>`;
     })
     .join('');
 
   const form = $('#modal-form');
+  form.querySelectorAll('.color-picker').forEach((picker) => {
+    const input = picker.querySelector('input[type=color]');
+    const mark = () =>
+      picker.querySelectorAll('.swatch[data-color]').forEach((s) => s.classList.toggle('selected', s.dataset.color === input.value));
+    picker.querySelectorAll('.swatch[data-color]').forEach((s) => (s.onclick = () => { input.value = s.dataset.color; mark(); }));
+    input.addEventListener('input', mark);
+  });
   form.onsubmit = async (e) => {
     e.preventDefault();
     const data = {};
     for (const f of fields) {
+      if (f.type === 'multi') {
+        data[f.name] = [...form.querySelectorAll(`[data-multi="${f.name}"] input:checked`)].map((i) => i.value);
+        if (f.required && !data[f.name].length) return toast(`${f.label}: seleziona almeno una voce`, true);
+        continue;
+      }
       const el = form.elements[f.name];
       data[f.name] = f.type === 'checkbox' ? el.checked : el.value;
     }
@@ -101,7 +139,7 @@ function renderMenu() {
     ? list
         .map(
           (c) =>
-            `<a href="#" class="nav-item ${route.name === 'cliente' && route.id === c.id ? 'active' : ''}" data-cliente="${c.id}">${esc(c.nome)}</a>`
+            `<a href="#" class="nav-item cliente-item ${route.name === 'cliente' && route.id === c.id ? 'active' : ''}" data-cliente="${c.id}" style="--cliente:${esc(c.colore)};--on-cliente:${textOn(c.colore)}"><span class="dot"></span>${esc(c.nome)}</a>`
         )
         .join('')
     : `<div class="empty">${clienti.length ? 'Nessun risultato' : 'Nessun cliente'}</div>`;
@@ -119,6 +157,7 @@ $('#btn-new-cliente').addEventListener('click', () => editCliente());
 
 function go(r) {
   route = r;
+  content.classList.remove('cliente-page');
   renderMenu();
   const views = { home: renderHome, cliente: renderCliente, settings: renderSettings };
   (views[r.name] || renderHome)();
@@ -172,14 +211,20 @@ const CLIENTE_FIELDS = [
   { name: 'telefono', label: 'Telefono' },
   { name: 'partita_iva', label: 'P.IVA / Codice fiscale' },
   { name: 'indirizzo', label: 'Indirizzo' },
-  { name: 'note', label: 'Note', type: 'textarea' }
+  { name: 'note', label: 'Note', type: 'textarea' },
+  { name: 'colore', label: 'Colore del cliente', type: 'color' },
+  {
+    name: 'sezioni', label: 'Sezioni da mostrare nella pagina del cliente', type: 'multi', required: true,
+    options: () => SEZIONI_ORDINE.map((k) => [k, SECTIONS[k].label, SECTIONS[k].descrizione])
+  }
 ];
 
 function editCliente(cliente) {
+  const fields = CLIENTE_FIELDS.map((f) => (typeof f.options === 'function' ? { ...f, options: f.options() } : f));
   openForm({
     title: cliente ? 'Modifica cliente' : 'Nuovo cliente',
-    fields: CLIENTE_FIELDS,
-    values: cliente || {},
+    fields,
+    values: cliente || { colore: PALETTE[clienti.length % PALETTE.length], sezioni: [] },
     onSubmit: async (data) => {
       const saved = cliente ? await api.clienti.update(cliente.id, data) : await api.clienti.create(data);
       toast(cliente ? 'Cliente aggiornato' : 'Cliente creato (database dedicato pronto)');
@@ -189,9 +234,29 @@ function editCliente(cliente) {
   });
 }
 
+// Ordine in cui le sezioni compaiono (nel modulo e come schede nella pagina del cliente)
+const SEZIONI_ORDINE = ['anagrafica', 'appuntamenti', 'servizi', 'pagamenti', 'fatture', 'acquisti'];
+
 const SECTIONS = {
+  // Sezioni ancora da definire: mostrano un segnaposto finché non vengono realizzate
+  anagrafica: {
+    label: 'Anagrafica clienti',
+    descrizione: 'Elenco dei clienti di questa attività',
+    placeholder: true
+  },
+  servizi: {
+    label: 'Servizi',
+    descrizione: 'Servizi offerti e loro durata',
+    placeholder: true
+  },
+  pagamenti: {
+    label: 'Pagamenti e rate',
+    descrizione: 'Tipi di pagamento e scadenze delle rate',
+    placeholder: true
+  },
   appuntamenti: {
     label: 'Appuntamenti',
+    descrizione: 'Agenda degli appuntamenti',
     singolare: 'appuntamento',
     nuovo: 'Nuovo appuntamento',
     vuoto: 'Nessun appuntamento registrato.',
@@ -213,6 +278,7 @@ const SECTIONS = {
   },
   fatture: {
     label: 'Fatturazione',
+    descrizione: 'Fatture emesse, IVA e incassi',
     singolare: 'fattura',
     nuovo: 'Nuova fattura',
     vuoto: 'Nessuna fattura registrata.',
@@ -246,6 +312,7 @@ const SECTIONS = {
   },
   acquisti: {
     label: 'Acquisti',
+    descrizione: 'Spese e acquisti dai fornitori',
     singolare: 'acquisto',
     nuovo: 'Nuovo acquisto',
     vuoto: 'Nessun acquisto registrato.',
@@ -267,13 +334,18 @@ const SECTIONS = {
 };
 
 async function renderCliente() {
-  const tab = route.tab && SECTIONS[route.tab] ? route.tab : 'appuntamenti';
-  route.tab = tab;
   const cliente = await safe(() => api.clienti.get(route.id));
   if (!cliente) return go({ name: 'home' });
+  const attive = SEZIONI_ORDINE.filter((k) => (cliente.sezioni || []).includes(k));
+  const tab = attive.includes(route.tab) ? route.tab : attive[0];
+  route.tab = tab;
+
+  content.classList.add('cliente-page');
+  content.style.setProperty('--cliente', cliente.colore);
+  content.style.setProperty('--on-cliente', textOn(cliente.colore));
 
   content.innerHTML = `
-    <div class="header-row">
+    <div class="cliente-header">
       <div>
         <h1>${esc(cliente.nome)}</h1>
         <div class="subtitle">${[cliente.email, cliente.telefono, cliente.partita_iva].filter(Boolean).map(esc).join(' · ') || '&nbsp;'}</div>
@@ -284,8 +356,8 @@ async function renderCliente() {
       </div>
     </div>
     <div class="tabs">
-      ${Object.entries(SECTIONS)
-        .map(([k, s]) => `<button class="tab ${k === tab ? 'active' : ''}" data-tab="${k}">${s.label}</button>`)
+      ${attive
+        .map((k) => `<button class="tab ${k === tab ? 'active' : ''}" data-tab="${k}">${SECTIONS[k].label}</button>`)
         .join('')}
     </div>
     <div id="section"></div>`;
@@ -306,6 +378,13 @@ async function renderCliente() {
 async function renderSection(cliente, table) {
   const s = SECTIONS[table];
   const el = $('#section');
+  if (s.placeholder) {
+    el.innerHTML = `<div class="panel placeholder">
+      <h3>${esc(s.label)}</h3>
+      <p class="muted">${esc(s.descrizione)}.<br>Questa sezione è attiva per ${esc(cliente.nome)} ma non è ancora stata realizzata.</p>
+    </div>`;
+    return;
+  }
   const rows = await safe(() => api.records.list(cliente.id, table));
 
   el.innerHTML = `

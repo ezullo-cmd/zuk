@@ -82,7 +82,10 @@ const MASTER_MIGRATIONS = [
      db_name     TEXT UNIQUE,
      archiviato  BOOLEAN NOT NULL DEFAULT false,
      creato_il   TIMESTAMPTZ NOT NULL DEFAULT now()
-   )`
+   )`,
+  // v2: colore e sezioni attive nella pagina del cliente
+  `ALTER TABLE clienti ADD COLUMN colore TEXT NOT NULL DEFAULT '#2f6fed';
+   ALTER TABLE clienti ADD COLUMN sezioni JSONB NOT NULL DEFAULT '["appuntamenti","fatture","acquisti"]'`
 ];
 
 const CLIENT_MIGRATIONS = [
@@ -176,7 +179,23 @@ async function poolForCliente(clienteId) {
 
 // ---- Clienti (DB master) ------------------------------------------------------
 
-const CLIENTE_FIELDS = ['nome', 'email', 'telefono', 'partita_iva', 'indirizzo', 'note'];
+const CLIENTE_FIELDS = ['nome', 'email', 'telefono', 'partita_iva', 'indirizzo', 'note', 'colore', 'sezioni'];
+
+// Sezioni che si possono attivare nella pagina di un cliente
+const SEZIONI = ['anagrafica', 'appuntamenti', 'servizi', 'pagamenti', 'fatture', 'acquisti'];
+
+function clienteValue(field, value) {
+  if (field === 'colore') {
+    if (!/^#[0-9a-f]{6}$/i.test(value || '')) throw new Error('Colore non valido');
+    return value.toLowerCase();
+  }
+  if (field === 'sezioni') {
+    const list = (Array.isArray(value) ? value : []).filter((s) => SEZIONI.includes(s));
+    if (!list.length) throw new Error('Seleziona almeno una sezione');
+    return JSON.stringify([...new Set(list)]);
+  }
+  return value === '' ? null : value ?? null;
+}
 
 async function listClienti({ includiArchiviati = false } = {}) {
   const { rows } = await requireMaster().query(
@@ -192,9 +211,10 @@ async function getCliente(id) {
 
 async function createCliente(data) {
   const master = requireMaster();
-  const vals = CLIENTE_FIELDS.map((f) => data[f] ?? null);
+  const fields = CLIENTE_FIELDS.filter((f) => data[f] !== undefined);
+  const vals = fields.map((f) => clienteValue(f, data[f]));
   const { rows } = await master.query(
-    `INSERT INTO clienti (${CLIENTE_FIELDS.join(',')}) VALUES (${CLIENTE_FIELDS.map((_, i) => `$${i + 1}`).join(',')}) RETURNING id`,
+    `INSERT INTO clienti (${fields.join(',')}) VALUES (${fields.map((_, i) => `$${i + 1}`).join(',')}) RETURNING id`,
     vals
   );
   const id = rows[0].id;
@@ -215,7 +235,7 @@ async function updateCliente(id, data) {
   if (fields.length) {
     await requireMaster().query(
       `UPDATE clienti SET ${fields.map((f, i) => `${f} = $${i + 1}`).join(', ')} WHERE id = $${fields.length + 1}`,
-      [...fields.map((f) => data[f]), id]
+      [...fields.map((f) => clienteValue(f, data[f])), id]
     );
   }
   return getCliente(id);
