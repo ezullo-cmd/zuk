@@ -210,7 +210,7 @@ async function renderElencoPersone(cliente, el) {
                     ${p.situazione.certificatoScaduto ? ' <span class="badge late" title="Certificato medico scaduto">Certificato scaduto</span>' : ''}</td>
                   <td>${esc(p.telefono)}</td>
                   <td>${p.situazione.percorsoAttuale || !MESI_TIPO[p.tipo_pagamento] ? badgePercorso(p.situazione.percorsoAttuale) : `${esc(tipoBreve(p.tipo_pagamento))}${p.importo ? ` · ${eur(p.importo)}` : ''}`}</td>
-                  <td>${badgePagamenti(p.situazione)}${p.situazione.ricevuteMancanti ? ` <span class="badge warn" title="Pagamenti senza ricevuta">${p.situazione.ricevuteMancanti} senza ricevuta</span>` : ''}</td>
+                  <td>${badgePagamenti(p.situazione)}${p.situazione.ricevuteMancanti ? ` <span class="badge warn" title="Pagamenti senza fattura">${p.situazione.ricevuteMancanti} senza fattura</span>` : ''}</td>
                   <td>${p.situazione.ultimoAppuntamento ? fmtDate(p.situazione.ultimoAppuntamento) : '<span class="muted">—</span>'}</td>
                   <td>${p.situazione.prossimoAppuntamento ? fmtDateTime(p.situazione.prossimoAppuntamento) : '<span class="muted">—</span>'}</td>
                 </tr>`
@@ -357,7 +357,7 @@ async function renderPersona(cliente, el, personaId) {
                   <td class="row-actions"><button class="btn small danger" data-doc-del="${doc.id}">Elimina</button></td></tr>`
               )
               .join('')}</tbody></table></div>`
-          : '<div class="muted empty-box">Nessun documento. Qui puoi caricare certificato medico, consenso privacy, ricevute…</div>'
+          : '<div class="muted empty-box">Nessun documento. Qui puoi caricare certificato medico, consenso privacy, fatture…</div>'
       }
     </div>`;
 
@@ -401,6 +401,7 @@ async function renderPersona(cliente, el, personaId) {
         await safe(() => api.pagamenti.save(cliente.id, {
           persona_id: p.id, periodo: r.periodo, percorso_id: r.percorso_id, numero_rata: r.numero_rata, esente: true, importo: 0, note: motivo
         }));
+        aggiornaRitardi();
         refresh();
       })
   );
@@ -412,6 +413,7 @@ async function renderPersona(cliente, el, personaId) {
       (b.onclick = async () => {
         if (!confirm('Annullare questo pagamento? La rata tornerà da pagare.')) return;
         await safe(() => api.records.remove(cliente.id, 'pagamenti', Number(b.dataset.rataDel)));
+        aggiornaRitardi();
         refresh();
       })
   );
@@ -446,14 +448,14 @@ function tabellaRate(rate, offset = 0) {
     in_ritardo: '<span class="badge late">⚠ In ritardo</span>'
   };
   return `<div class="table-wrap"><table>
-    <thead><tr><th>Rata</th><th>Scadenza</th><th class="num">Importo</th><th>Stato</th><th>Pagata il</th><th>Ricevuta</th><th></th></tr></thead>
+    <thead><tr><th>Rata</th><th>Scadenza</th><th class="num">Importo</th><th>Stato</th><th>Pagata il</th><th>Fattura</th><th></th></tr></thead>
     <tbody>${rate
       .map((r, j) => {
         const i = j + offset;
         const pag = r.pagamento;
         let ricevuta = '';
         if (pag?.documento_id) ricevuta = `<a class="link" data-doc-open="${pag.documento_id}">📄 Apri</a>`;
-        else if (r.ricevuta_mancante) ricevuta = `<button class="btn small warn-btn" data-rata-upload="${i}">Carica ricevuta</button>`;
+        else if (r.ricevuta_mancante) ricevuta = `<button class="btn small warn-btn" data-rata-upload="${i}">Carica fattura</button>`;
         return `<tr class="${r.stato === 'in_ritardo' ? 'row-late' : ''}">
           <td><strong>${esc(periodoLabel(r))}</strong>${pag?.note ? `<div class="muted small">${esc(pag.note)}</div>` : ''}</td>
           <td>${r.scadenza ? fmtDate(r.scadenza) : '—'}</td>
@@ -475,18 +477,18 @@ function registraPagamento(cliente, persona, rata, onDone, soloRicevuta = false)
   const pag = rata?.pagamento;
   const oggi = new Date().toISOString().slice(0, 10);
   const fields = soloRicevuta
-    ? [{ name: 'ricevuta', label: 'Ricevuta (PDF o foto)', type: 'file', accept: ACCEPT_DOC, required: true }]
+    ? [{ name: 'ricevuta', label: 'Fattura (PDF o foto)', type: 'file', accept: ACCEPT_DOC, required: true }]
     : [
         ...(rata?.periodo || rata?.percorso_id ? [] : [{ name: 'periodo', label: 'Mese di riferimento (facoltativo)', type: 'month' }]),
         { name: 'importo', label: 'Importo pagato (€)', type: 'number', step: '0.01', required: true },
         { name: 'pagato_il', label: 'Pagato il', type: 'date', required: true },
         { name: 'metodo', label: 'Metodo', type: 'select', options: METODI },
-        { name: 'ricevuta', label: pag?.documento_id ? 'Sostituisci ricevuta (facoltativo)' : 'Ricevuta (PDF o foto)', type: 'file', accept: ACCEPT_DOC },
+        { name: 'ricevuta', label: pag?.documento_id ? 'Sostituisci fattura (facoltativo)' : 'Fattura (PDF o foto)', type: 'file', accept: ACCEPT_DOC },
         { name: 'note', label: 'Note', type: 'textarea' }
       ];
   openForm({
     title: soloRicevuta
-      ? `Ricevuta · ${periodoLabel(rata)}`
+      ? `Fattura · ${periodoLabel(rata)}`
       : `${pag ? 'Modifica pagamento' : 'Registra pagamento'}${rata?.periodo || rata?.percorso_id ? ` · ${periodoLabel(rata)}` : ''}`,
     fields,
     values: pag
@@ -496,12 +498,13 @@ function registraPagamento(cliente, persona, rata, onDone, soloRicevuta = false)
       const file = await fileDaInput(data.ricevuta);
       const periodo = rata?.periodo || (!rata?.percorso_id && data.periodo ? `${data.periodo}-01` : null);
       const rif = rata?.percorso_id ? { percorso_id: rata.percorso_id, numero_rata: rata.numero_rata } : {};
-      const descrizione_ricevuta = rata?.percorso_id ? `Ricevuta ${periodoLabel(rata).toLowerCase()} (scad. ${fmtDate(rata.scadenza)})` : undefined;
+      const descrizione_ricevuta = rata?.percorso_id ? `Fattura ${periodoLabel(rata).toLowerCase()} (scad. ${fmtDate(rata.scadenza)})` : undefined;
       const payload = soloRicevuta
         ? { ...pag }
         : { ...(pag || {}), ...rif, persona_id: persona.id, periodo, importo: data.importo, pagato_il: data.pagato_il, metodo: data.metodo, note: data.note, esente: false };
       await api.pagamenti.save(cliente.id, { ...payload, persona_id: persona.id, descrizione_ricevuta }, file);
-      toast(soloRicevuta ? 'Ricevuta caricata' : 'Pagamento registrato');
+      toast(soloRicevuta ? 'Fattura caricata' : 'Pagamento registrato');
+      await aggiornaRitardi();
       onDone();
     }
   });

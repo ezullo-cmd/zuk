@@ -177,3 +177,12 @@ tr.row-muted td { opacity: .55; }
 .anteprima li { display: grid; grid-template-columns: 120px 1fr auto; gap: 10px; padding: 3px 0; border-top: 1px dashed var(--border); }
 .anteprima li:first-child { border-top: none; }
 .badge { white-space: nowrap; }
+
+/* ---- Pagamenti e avvisi ritardi ---- */
+.count-late { display: inline-block; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--late); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+.cliente-item .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-warn { border-color: #f2d39b; background: #fffaf0; }
+.card .muted { font-size: 12px; margin-top: 2px; }
+.late-days { color: var(--late); font-size: 12px; font-weight: 600; margin-top: 2px; }
+label.inline { flex-direction: row; align-items: center; gap: 6px; }
+label.inline input { padding: 6px 8px; }

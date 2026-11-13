@@ -69,6 +69,7 @@ function registerIpc() {
   handle('records:delete', (clienteId, table, id) => db.remove(clienteId, table, id));
 
   handle('persone:list', (clienteId) => persone.listPersone(clienteId));
+  handle('rate:list', (clienteId) => persone.listRate(clienteId));
   handle('persone:get', (clienteId, id) => persone.dettaglioPersona(clienteId, id));
   handle('persone:save', (clienteId, id, data) => persone.salvaPersona(clienteId, id, data));
   handle('percorsi:save', (clienteId, id, data) => persone.salvaPercorso(clienteId, id, data));

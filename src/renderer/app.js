@@ -149,6 +149,9 @@ function openForm({ title, fields, values = {}, onSubmit, onInput }) {
 let clienti = [];
 let route = { name: 'home' };
 
+// numero di persone con rate in ritardo per ogni cliente (pallino rosso nel menù)
+let ritardiPerCliente = {};
+
 async function loadClienti() {
   try {
     clienti = await api.clienti.list();
@@ -156,6 +159,30 @@ async function loadClienti() {
     clienti = [];
   }
   renderMenu();
+  aggiornaRitardi();
+}
+
+// pallino rosso sulle schede Anagrafica e Pagamenti del cliente aperto
+function badgeSchede() {
+  if (route.name !== 'cliente') return;
+  const n = ritardiPerCliente[route.id];
+  content.querySelectorAll('.tab[data-tab="pagamenti"], .tab[data-tab="anagrafica"]').forEach((b) => {
+    b.querySelector('.count-late')?.remove();
+    if (n) b.insertAdjacentHTML('beforeend', ` <span class="count-late">${n}</span>`);
+  });
+}
+
+async function aggiornaRitardi() {
+  try {
+    const d = await api.dashboard();
+    ritardiPerCliente = {};
+    for (const r of d.ritardi) ritardiPerCliente[r.cliente_id] = (ritardiPerCliente[r.cliente_id] || 0) + r.rate.length;
+    renderMenu();
+    badgeSchede();
+    return d;
+  } catch {
+    return null;
+  }
 }
 
 function renderMenu() {
@@ -165,7 +192,7 @@ function renderMenu() {
     ? list
         .map(
           (c) =>
-            `<a href="#" class="nav-item cliente-item ${route.name === 'cliente' && route.id === c.id ? 'active' : ''}" data-cliente="${c.id}" style="--cliente:${esc(c.colore)};--on-cliente:${textOn(c.colore)}"><span class="dot"></span>${esc(c.nome)}</a>`
+            `<a href="#" class="nav-item cliente-item ${route.name === 'cliente' && route.id === c.id ? 'active' : ''}" data-cliente="${c.id}" style="--cliente:${esc(c.colore)};--on-cliente:${textOn(c.colore)}"><span class="dot"></span><span class="grow">${esc(c.nome)}</span>${ritardiPerCliente[c.id] ? `<span class="count-late" title="Rate in ritardo">${ritardiPerCliente[c.id]}</span>` : ''}</a>`
         )
         .join('')
     : `<div class="empty">${clienti.length ? 'Nessun risultato' : 'Nessun cliente'}</div>`;
@@ -293,11 +320,6 @@ const SECTIONS = {
     descrizione: 'Servizi offerti e loro durata',
     placeholder: true
   },
-  pagamenti: {
-    label: 'Pagamenti e rate',
-    descrizione: 'Tipi di pagamento e scadenze delle rate',
-    placeholder: true
-  },
   appuntamenti: {
     label: 'Appuntamenti',
     descrizione: 'Agenda degli appuntamenti',
@@ -415,6 +437,7 @@ async function renderCliente() {
     go({ name: 'home' });
   };
   content.querySelectorAll('.tab').forEach((b) => (b.onclick = () => go({ name: 'cliente', id: route.id, tab: b.dataset.tab })));
+  badgeSchede();
 
   await renderSection(cliente, tab);
 }
@@ -605,4 +628,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('#app-version').textContent = info.version;
   await loadClienti();
   go({ name: info.dbReady ? 'home' : 'settings' });
+  // all'apertura: notifica di sistema se ci sono rate in ritardo
+  if (info.dbReady) {
+    const d = await aggiornaRitardi();
+    const n = d ? d.ritardi.reduce((s, r) => s + r.rate.length, 0) : 0;
+    if (n) {
+      const nomi = d.ritardi.slice(0, 3).map((r) => r.persona_nome).join(', ') + (d.ritardi.length > 3 ? '…' : '');
+      const notifica = new Notification(`${n} ${n === 1 ? 'rata in ritardo' : 'rate in ritardo'}`, { body: nomi });
+      notifica.onclick = () => go({ name: 'home' });
+    }
+  }
 });

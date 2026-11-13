@@ -260,6 +260,26 @@ async function listPersone(clienteId) {
   });
 }
 
+/** Tutte le rate di tutte le persone (per la sezione "Pagamenti e rate"). */
+async function listRate(clienteId) {
+  const pool = await db.poolForCliente(clienteId);
+  const [persone, pagamenti, percorsi] = await Promise.all([
+    pool.query('SELECT * FROM persone ORDER BY cognome, nome'),
+    pool.query(`SELECT ${PAG_COLS} FROM pagamenti`),
+    pool.query('SELECT * FROM percorsi')
+  ]);
+  const oggi = oggiISO();
+  const rate = [];
+  for (const p of persone.rows) {
+    const s = situazioneCompleta(p, percorsi.rows, pagamenti.rows.filter((x) => x.persona_id === p.id), oggi);
+    const persona = { id: p.id, nome: p.nome, cognome: p.cognome, stato: p.stato, importo: p.importo, metodo_pagamento: p.metodo_pagamento };
+    for (const pc of s.percorsi)
+      for (const r of pc.rate) rate.push({ ...r, persona, tipo_percorso: pc.tipo, percorso_fine: pc.fine });
+    for (const r of s.legacy.rate) rate.push({ ...r, persona, tipo_percorso: null });
+  }
+  return { oggi, rate };
+}
+
 async function dettaglioPersona(clienteId, personaId) {
   const pool = await db.poolForCliente(clienteId);
   const [p, pagamenti, documenti, appuntamenti, percorsi] = await Promise.all([
@@ -312,7 +332,7 @@ async function salvaPagamento(clienteId, data, file) {
     await c.query('BEGIN');
     let documentoId = v(data.documento_id);
     if (f) {
-      const descr = data.descrizione_ricevuta || (data.periodo ? `Ricevuta rata ${data.periodo.slice(0, 7)}` : 'Ricevuta pagamento');
+      const descr = data.descrizione_ricevuta || (data.periodo ? `Fattura rata ${data.periodo.slice(0, 7)}` : 'Fattura pagamento');
       documentoId = (await inserisciDocumento(c, data.persona_id, f, descr)).id;
     }
     const vals = [
@@ -405,6 +425,6 @@ async function salvaPercorso(clienteId, id, data) {
 module.exports = {
   FREQUENZE, periodiAttesi, situazioneRate, statisticheAppuntamenti,
   finePercorso, pianoRate, situazionePercorso,
-  listPersone, dettaglioPersona, salvaPersona, salvaPercorso, salvaPagamento,
+  listPersone, listRate, dettaglioPersona, salvaPersona, salvaPercorso, salvaPagamento,
   caricaDocumento, leggiDocumento, eliminaDocumento
 };
