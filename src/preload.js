@@ -19,7 +19,8 @@ contextBridge.exposeInMainWorld('api', {
     get: (id) => call('clienti:get', id),
     create: (data) => call('clienti:create', data),
     update: (id, data) => call('clienti:update', id, data),
-    archive: (id, archiviato) => call('clienti:archive', id, archiviato)
+    archive: (id, archiviato) => call('clienti:archive', id, archiviato),
+    remove: (id, nomeConferma) => call('clienti:delete', id, nomeConferma)
   },
   records: {
     list: (clienteId, table) => call('records:list', clienteId, table),

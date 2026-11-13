@@ -95,6 +95,7 @@ function registerIpc() {
   handle('portale:sblocca', (utente) => portale.sblocca(utente));
   handle('clienti:update', (id, data) => db.updateCliente(id, data));
   handle('clienti:archive', (id, archiviato) => db.setArchiviato(id, archiviato));
+  handle('clienti:delete', (id, nomeConferma) => db.eliminaCliente(id, nomeConferma));
 
   handle('records:list', (clienteId, table) => db.list(clienteId, table));
   handle('records:create', (clienteId, table, data) => db.create(clienteId, table, data));

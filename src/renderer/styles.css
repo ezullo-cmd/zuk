@@ -273,3 +273,9 @@ tr.row-done td { color: var(--muted); }
 .tipo-nuovo input { flex: 1; }
 .tipo-riga .rinomina { margin: 0; flex: 1; }
 .tipo-riga:has(.rinomina) { flex-direction: column; align-items: stretch; }
+
+/* ---- Eliminazione cliente ---- */
+.avviso-elimina { background: var(--late-bg); border: 1px solid #f3b4b4; color: #7a1f1f; border-radius: 8px; padding: 12px 14px; font-size: 13px; line-height: 1.5; }
+.avviso-elimina strong:first-child { display: block; margin-bottom: 4px; }
+.btn-danger-fill { background: var(--danger) !important; border-color: var(--danger) !important; color: #fff !important; }
+.btn-danger-fill:disabled { opacity: .45; cursor: not-allowed; }

@@ -106,6 +106,11 @@ function openForm({ title, fields, values = {}, onSubmit, onInput }) {
     .join('');
 
   const form = $('#modal-form');
+  // il pulsante di conferma è condiviso: torna sempre allo stato normale
+  const conferma = form.querySelector('button[type=submit]');
+  conferma.textContent = 'Salva';
+  conferma.className = 'btn primary';
+  conferma.disabled = false;
   form.querySelectorAll('.color-picker').forEach((picker) => {
     const input = picker.querySelector('input[type=color]');
     const mark = () =>
@@ -405,6 +410,39 @@ api.promemoria.onAggiornati((esito) => {
   if (route.name === 'home' || (route.name === 'cliente' && route.tab === 'pagamenti')) go(route);
 });
 
+// ---------- Eliminazione definitiva di un cliente ----------------------------
+function eliminaCliente(cliente, onDone) {
+  openForm({
+    title: `Eliminare "${cliente.nome}"?`,
+    fields: [
+      { name: 'avviso', type: 'html' },
+      { name: 'conferma', label: `Per confermare scrivi il nome del cliente: ${cliente.nome}`, full: true, required: true }
+    ],
+    values: { conferma: '' },
+    onInput: (v, form) => {
+      const a = $('#avviso');
+      if (!a.innerHTML)
+        a.innerHTML = `<div class="avviso-elimina">
+          <strong>⚠️ Operazione definitiva, non si può annullare.</strong>
+          Verranno cancellati il database del cliente con <strong>tutti i dati</strong>: anagrafica, percorsi, rate,
+          pagamenti e contabili PDF, appuntamenti, fatture, acquisti, promemoria, e l'accesso al portale.
+          <div class="muted small">Se vuoi solo toglierlo dal menù, usa invece “Archivia”: i dati restano e potrai ripristinarlo.</div>
+        </div>`;
+      const ok = v.conferma.trim() === cliente.nome.trim();
+      const btn = form.querySelector('button[type=submit]');
+      btn.disabled = !ok;
+      btn.textContent = 'Elimina definitivamente';
+      btn.classList.add('btn-danger-fill');
+    },
+    onSubmit: async ({ conferma }) => {
+      await api.clienti.remove(cliente.id, conferma);
+      toast(`"${cliente.nome}" eliminato`);
+      await loadClienti();
+      onDone && onDone();
+    }
+  });
+}
+
 // ---------- Cliente ---------------------------------------------------------
 const CLIENTE_FIELDS = [
   { name: 'nome', label: 'Nome / Ragione sociale', required: true, full: true },
@@ -635,7 +673,8 @@ async function renderCliente() {
       </div>
       <div class="btn-row">
         <button class="btn" id="btn-edit-cliente">Modifica</button>
-        <button class="btn danger" id="btn-archive-cliente">Archivia</button>
+        <button class="btn" id="btn-archive-cliente" title="Nasconde il cliente, i dati restano">Archivia</button>
+        <button class="btn danger" id="btn-delete-cliente" title="Cancella definitivamente il cliente e tutti i suoi dati">Elimina</button>
       </div>
     </div>
     <div class="tabs">
@@ -647,12 +686,13 @@ async function renderCliente() {
 
   $('#btn-edit-cliente').onclick = () => editCliente(cliente);
   $('#btn-archive-cliente').onclick = async () => {
-    if (!confirm(`Archiviare "${cliente.nome}"? I dati restano nel suo database.`)) return;
+    if (!confirm(`Archiviare "${cliente.nome}"? Sparirà dal menù ma i dati restano: potrai ripristinarlo da Impostazioni → Clienti archiviati.`)) return;
     await safe(() => api.clienti.archive(cliente.id, true));
     toast('Cliente archiviato');
     await loadClienti();
     go({ name: 'home' });
   };
+  $('#btn-delete-cliente').onclick = () => eliminaCliente(cliente, () => go({ name: 'home' }));
   content.querySelectorAll('.tab').forEach((b) => (b.onclick = () => go({ name: 'cliente', id: route.id, tab: b.dataset.tab })));
   badgeSchede();
 
@@ -794,6 +834,10 @@ async function renderSettings() {
       <div id="accesso-db"></div>
     </div>
     <div class="panel">
+      <h3>Clienti archiviati</h3>
+      <div id="archiviati"><div class="muted">Caricamento…</div></div>
+    </div>
+    <div class="panel">
       <h3>Aggiornamenti</h3>
       <p class="muted">L'app controlla automaticamente la presenza di nuove versioni all'avvio e ogni 30 minuti.</p>
       <button class="btn" id="btn-check-update">Controlla ora</button>
@@ -838,6 +882,7 @@ async function renderSettings() {
     renderSettings();
   };
   $('#btn-check-update').onclick = () => api.updater.check();
+  disegnaArchiviati();
   $('#portale-form').onsubmit = async (e) => {
     e.preventDefault();
     await safe(() => api.portale.saveUrl(e.target.url.value));
@@ -916,6 +961,27 @@ api.updater.onEvent((ev) => {
       break;
   }
 });
+
+// ---------- Clienti archiviati (Impostazioni) -------------------------------
+async function disegnaArchiviati() {
+  const box = $('#archiviati');
+  if (!box) return;
+  const tutti = await api.clienti.list({ includiArchiviati: true }).catch(() => []);
+  const arch = tutti.filter((c) => c.archiviato);
+  box.innerHTML = arch.length
+    ? arch.map((c) => `<div class="tipo-riga"><div class="grow"><strong>${esc(c.nome)}</strong></div>
+        <button class="btn small" data-ripristina-cliente="${c.id}">Ripristina</button>
+        <button class="btn small danger" data-elimina-cliente="${c.id}">Elimina</button></div>`).join('')
+    : '<div class="muted">Nessun cliente archiviato.</div>';
+  box.querySelectorAll('[data-ripristina-cliente]').forEach((b) => (b.onclick = async () => {
+    await safe(() => api.clienti.archive(Number(b.dataset.ripristinaCliente), false));
+    toast('Cliente ripristinato');
+    await loadClienti();
+    disegnaArchiviati();
+  }));
+  box.querySelectorAll('[data-elimina-cliente]').forEach((b) => (b.onclick = () =>
+    eliminaCliente(arch.find((c) => c.id === Number(b.dataset.eliminaCliente)), disegnaArchiviati)));
+}
 
 // ---------- WhatsApp Web ----------------------------------------------------
 let waStato = { stato: 'disconnesso' };

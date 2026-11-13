@@ -453,6 +453,41 @@ async function updateCliente(id, input) {
   return getCliente(id);
 }
 
+/**
+ * Elimina definitivamente un cliente: il suo database (persone, rate, contabili, appuntamenti…)
+ * e la sua riga nell'anagrafica, compresi gli accessi al portale. Non si può annullare.
+ */
+async function eliminaCliente(id, nomeConferma) {
+  const c = await getClienteCompleto(id);
+  if (!c) throw new Error('Cliente non trovato');
+  if (String(nomeConferma || '').trim() !== c.nome.trim()) throw new Error('Il nome scritto non corrisponde: eliminazione annullata');
+
+  // chiude le connessioni dell'app verso il database del cliente
+  const pool = clientPools.get(id);
+  clientPools.delete(id);
+  if (pool) await pool.end().catch(() => {});
+
+  if (c.db_name) {
+    const admin = await adminClient();
+    try {
+      try {
+        // FORCE chiude anche le connessioni aperte da altri (es. il portale o un altro PC)
+        await admin.query(`DROP DATABASE IF EXISTS ${quoteIdent(c.db_name)} WITH (FORCE)`);
+      } catch (e) {
+        if (e.code !== '42601') throw e; // Postgres < 13: niente FORCE
+        await admin.query('SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()', [c.db_name]).catch(() => {});
+        await admin.query(`DROP DATABASE IF EXISTS ${quoteIdent(c.db_name)}`);
+      }
+    } finally {
+      await admin.end();
+    }
+  }
+  const master = requireMaster();
+  if (c.portale_utente) await master.query('DELETE FROM portale_accessi WHERE utente = $1', [c.portale_utente]);
+  await master.query('DELETE FROM clienti WHERE id = $1', [id]);
+  return true;
+}
+
 async function setArchiviato(id, archiviato) {
   await requireMaster().query('UPDATE clienti SET archiviato = $1 WHERE id = $2', [!!archiviato, id]);
   return getCliente(id);
@@ -592,5 +627,6 @@ async function testConnection(dbConfig) {
 module.exports = {
   init, close, isReady, testConnection,
   listClienti, getCliente, createCliente, updateCliente, setArchiviato,
+  eliminaCliente,
   list, create, update, remove, dashboard, poolForCliente, requireMaster, getConfig: () => cfg
 };
