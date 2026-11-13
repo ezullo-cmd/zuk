@@ -347,7 +347,7 @@ async function salvaPagamento(clienteId, data, file) {
     await c.query('BEGIN');
     let documentoId = v(data.documento_id);
     if (f) {
-      const descr = data.descrizione_ricevuta || (data.periodo ? `Fattura rata ${data.periodo.slice(0, 7)}` : 'Fattura pagamento');
+      const descr = data.descrizione_ricevuta || (data.periodo ? `Contabile rata ${data.periodo.slice(0, 7)}` : 'Contabile pagamento');
       documentoId = (await inserisciDocumento(c, data.persona_id, f, descr)).id;
     }
     const vals = [

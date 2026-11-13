@@ -9,7 +9,7 @@ const giorniTra = (a, b) => Math.round((new Date(b + 'T00:00:00') - new Date(a +
 
 SECTIONS.pagamenti = {
   label: 'Pagamenti e rate',
-  descrizione: 'Rate pagate, fatture PDF e ritardi',
+  descrizione: 'Rate pagate, contabili PDF e ritardi',
   render: async function renderPagamenti(cliente, el) {
     const { oggi, rate } = await safe(() => api.rate.list(cliente.id));
     const meseCorrente = oggi.slice(0, 7);
@@ -50,7 +50,7 @@ SECTIONS.pagamenti = {
           <div class="value">${eur(somma(scadonoMese))}</div><div class="muted">${scadonoMese.length} rate</div></div>
         <div class="card"><div class="label">Incassato questo mese</div>
           <div class="value">${eur(somma(incassatiMese))}</div><div class="muted">${incassatiMese.length} rate</div></div>
-        <div class="card ${senzaFattura.length ? 'card-warn' : ''}"><div class="label">Pagate senza fattura</div>
+        <div class="card ${senzaFattura.length ? 'card-warn' : ''}"><div class="label">Pagate senza contabile</div>
           <div class="value">${senzaFattura.length}</div><div class="muted">PDF da caricare</div></div>
       </div>
 
@@ -61,7 +61,7 @@ SECTIONS.pagamenti = {
             ['aperte', 'Da incassare'],
             ['ritardo', `In ritardo${ritardo.length ? ` (${ritardo.length})` : ''}`],
             ['pagate', 'Pagate'],
-            ['senza_fattura', `Senza fattura${senzaFattura.length ? ` (${senzaFattura.length})` : ''}`],
+            ['senza_fattura', `Senza contabile${senzaFattura.length ? ` (${senzaFattura.length})` : ''}`],
             ['tutte', 'Tutte']
           ]
             .map(([k, l]) => `<button data-vista="${k}" class="${filtroRate.vista === k ? 'active' : ''} ${k === 'ritardo' && ritardo.length ? 'alert' : ''}">${l}</button>`)
@@ -72,7 +72,7 @@ SECTIONS.pagamenti = {
       </div>
 
       <div class="table-wrap"><table>
-        <thead><tr><th>Persona</th><th>Percorso</th><th>Rata</th><th>Scadenza</th><th class="num">Importo</th><th>Stato</th><th>Pagata il</th><th>Fattura</th><th></th></tr></thead>
+        <thead><tr><th>Persona</th><th>Percorso</th><th>Rata</th><th>Scadenza</th><th class="num">Importo</th><th>Stato</th><th>Pagata il</th><th>Contabile</th><th></th></tr></thead>
         <tbody>${
           lista.length
             ? lista
@@ -87,7 +87,7 @@ SECTIONS.pagamenti = {
                   }[r.stato];
                   let fattura = '';
                   if (pag?.documento_id) fattura = `<a class="link" data-doc-open="${pag.documento_id}">📄 Apri</a>`;
-                  else if (r.ricevuta_mancante) fattura = `<button class="btn small warn-btn" data-r-upload="${i}">Carica fattura</button>`;
+                  else if (r.ricevuta_mancante) fattura = `<button class="btn small warn-btn" data-r-upload="${i}">Carica contabile</button>`;
                   return `<tr class="${r.stato === 'in_ritardo' ? 'row-late' : ''} ${r.persona.stato === 'cessato' ? 'row-muted' : ''}">
                     <td><a class="link" data-open-persona="${r.persona.id}"><strong>${esc(r.persona.cognome)} ${esc(r.persona.nome)}</strong></a></td>
                     <td>${r.tipo_percorso ? esc(label(TIPI_PERCORSO, r.tipo_percorso)) : '<span class="muted">—</span>'}</td>
@@ -141,7 +141,7 @@ SECTIONS.pagamenti = {
       registraPagamento(cliente, r.persona, r, refresh, true);
     }));
     el.querySelectorAll('[data-r-del]').forEach((b) => (b.onclick = async () => {
-      if (!confirm('Annullare questo pagamento? La rata tornerà da pagare e la fattura resterà tra i documenti della persona.')) return;
+      if (!confirm('Annullare questo pagamento? La rata tornerà da pagare e la contabile resterà tra i documenti della persona.')) return;
       await safe(() => api.records.remove(cliente.id, 'pagamenti', Number(b.dataset.rDel)));
       toast('Pagamento annullato');
       aggiornaRitardi();
