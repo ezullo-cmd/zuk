@@ -1,4 +1,4 @@
-/* global api, SECTIONS, $, esc, eur, toast, safe, fmtDate, fmtDateTime, periodoLabel, registraPagamento, label, TIPI_PERCORSO, METODI */
+/* global api, SECTIONS, statoPromemoria, $, esc, eur, toast, safe, fmtDate, fmtDateTime, periodoLabel, registraPagamento, label, TIPI_PERCORSO, METODI */
 'use strict';
 
 // ---------- Sezione "Pagamenti e rate": registro di tutte le rate --------------
@@ -178,17 +178,14 @@ function pannelloPromemoria(cliente, prom) {
         <div><a class="link" data-open-persona="${x.persona_id}"><strong>${esc(x.cognome)} ${esc(x.nome)}</strong></a>
           <span class="muted">· rata in scadenza il ${fmtDate(x.scadenza)} · ${x.canale === 'email' ? 'email' : 'WhatsApp'} ${esc(x.destinatario || '')}</span></div>
         <div class="prom-testo">${esc(x.testo)}</div>
-        ${x.stato === 'errore' ? `<div class="late-days">Errore: ${esc(x.errore)}</div>` : ''}
+        ${x.stato !== 'inviato' ? statoPromemoria(x) : ''}
         ${x.stato === 'inviato' ? `<div class="muted small">Inviato il ${fmtDateTime(x.inviato_il)}</div>` : ''}
       </div>
       <div class="prom-actions">${
         x.stato === 'inviato'
           ? ''
-          : x.canale === 'whatsapp'
-            ? `<button class="btn small wa-btn" data-prom-wa="${x.id}">Invia su WhatsApp</button>
-               <button class="btn small" data-prom-ok="${x.id}">Segna come inviato</button>`
-            : `<button class="btn small primary" data-prom-retry="${x.id}">Riprova</button>
-               <button class="btn small" data-prom-ok="${x.id}">Segna come inviato</button>`
+          : `${x.stato === 'errore' ? `<button class="btn small primary" data-prom-retry="${x.id}">Riprova</button>` : ''}
+             <button class="btn small" data-prom-ok="${x.id}" title="Se l'hai già avvisato in altro modo">Segna come inviato</button>`
       }<button class="btn small ghost" data-prom-del="${x.id}" title="Rimuovi">✕</button></div>
     </div>`;
   return `<div class="panel promemoria-panel">
@@ -196,7 +193,7 @@ function pannelloPromemoria(cliente, prom) {
       <h3>🔔 Promemoria rate ${aperti.length ? `<span class="count-late">${aperti.length}</span>` : ''}</h3>
       <button class="btn small" id="btn-prom-check">Controlla ora</button>
     </div>
-    ${aperti.length ? aperti.map(riga).join('') : '<div class="muted">Nessun promemoria da inviare. Partono da soli 5 giorni lavorativi prima di ogni scadenza.</div>'}
+    ${aperti.length ? aperti.map(riga).join('') : '<div class="muted">Nessun promemoria in attesa. Partono da soli 5 giorni lavorativi prima di ogni scadenza, dall\'orario impostato.</div>'}
     ${inviati.length ? `<details><summary class="muted">Inviati di recente (${inviati.length})</summary>${inviati.map(riga).join('')}</details>` : ''}
   </div>`;
 }
@@ -207,22 +204,19 @@ function collegaPromemoria(el, cliente, refresh) {
     btn.onclick = async () => {
       btn.disabled = true;
       const e = await safe(() => api.promemoria.check()).finally(() => (btn.disabled = false));
-      toast(e && (e.email || e.whatsapp || e.errori) ? `Email inviate: ${e.email} · WhatsApp da inviare: ${e.whatsapp} · Errori: ${e.errori}` : 'Nessun nuovo promemoria');
+      toast(e && (e.email || e.whatsapp || e.errori || e.inAttesa)
+        ? `Email inviate: ${e.email} · WhatsApp inviati: ${e.whatsapp} · In attesa: ${e.inAttesa} · Errori: ${e.errori}`
+        : 'Nessun promemoria da inviare ora (partono dall\'orario impostato)');
       refresh();
     };
-  el.querySelectorAll('[data-prom-wa]').forEach((b) => (b.onclick = () => safe(() => api.promemoria.whatsapp(cliente.id, Number(b.dataset.promWa)))));
   el.querySelectorAll('[data-prom-ok]').forEach((b) => (b.onclick = async () => {
     await safe(() => api.promemoria.segnaInviato(cliente.id, Number(b.dataset.promOk)));
     refresh();
   }));
   el.querySelectorAll('[data-prom-retry]').forEach((b) => (b.onclick = async () => {
     b.disabled = true;
-    try {
-      await api.promemoria.riprova(cliente.id, Number(b.dataset.promRetry));
-      toast('Email inviata');
-    } catch (e) {
-      toast('Invio non riuscito: ' + e.message, true);
-    }
+    await safe(() => api.promemoria.rimettiInCoda(cliente.id, Number(b.dataset.promRetry)));
+    toast('Rimesso in coda: verrà inviato ora (se è passato l\'orario di invio)');
     refresh();
   }));
   el.querySelectorAll('[data-prom-del]').forEach((b) => (b.onclick = async () => {

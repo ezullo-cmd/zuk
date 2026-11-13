@@ -7,6 +7,13 @@ const config = require('./config');
 const db = require('./db');
 const persone = require('./persone');
 const promemoria = require('./promemoria');
+const whatsapp = require('./whatsapp');
+
+promemoria.configura({
+  emailConfig: () => config.emailConfig(),
+  whatsapp,
+  orario: () => config.load().orarioPromemoria
+});
 const { setupUpdater } = require('./updater');
 
 log.initialize();
@@ -75,15 +82,45 @@ function registerIpc() {
   handle('promemoria:daInviare', () => promemoria.daInviareTutti());
   handle('promemoria:check', () => controllaPromemoria());
   handle('promemoria:inviato', (clienteId, id) => promemoria.segnaInviato(clienteId, id));
-  handle('promemoria:riprova', (clienteId, id) => promemoria.riprova(clienteId, id));
-  handle('promemoria:delete', (clienteId, id) => promemoria.eliminaPromemoria(clienteId, id));
-  handle('promemoria:prova', (smtp, a) => promemoria.emailDiProva(smtp, a));
-  handle('promemoria:whatsapp', async (clienteId, id) => {
-    const r = (await promemoria.elenco(clienteId)).find((x) => x.id === id);
-    if (!r?.link) throw new Error('Numero di telefono non valido per WhatsApp');
-    await shell.openExternal(r.link);
+  handle('promemoria:rimetti', async (clienteId, id) => {
+    await promemoria.rimettiInCoda(clienteId, id);
+    return controllaPromemoria();
+  });
+
+  // Casella email unica per i promemoria (la password non torna mai all'interfaccia)
+  handle('email:get', () => {
+    const c = config.load();
+    const { passwordCifrata, ...e } = c.email;
+    return { ...e, haPassword: !!passwordCifrata, orario: c.orarioPromemoria };
+  });
+  handle('email:save', (data) => {
+    const c = config.load();
+    c.email = {
+      ...c.email,
+      user: String(data.user || '').trim(),
+      host: data.host || 'smtp.gmail.com',
+      port: Number(data.port) || 465,
+      secure: data.secure !== false
+    };
+    if (data.password) c.email.passwordCifrata = config.cifra(data.password.replace(/\s+/g, ''));
+    if (/^\d{2}:\d{2}$/.test(data.orario || '')) c.orarioPromemoria = data.orario;
+    config.save(c);
     return true;
   });
+  handle('email:prova', (data) => {
+    const salvata = config.emailConfig();
+    const cfg = {
+      ...salvata, ...data,
+      password: data.password ? data.password.replace(/\s+/g, '') : salvata.password
+    };
+    return promemoria.emailDiProva(cfg, cfg.user);
+  });
+
+  // WhatsApp Web
+  handle('wa:stato', () => whatsapp.getStato());
+  handle('wa:connetti', () => whatsapp.connetti());
+  handle('wa:annulla', () => whatsapp.annulla());
+  handle('wa:disconnetti', () => whatsapp.disconnetti());
   handle('rate:list', (clienteId) => persone.listRate(clienteId));
   handle('persone:get', (clienteId, id) => persone.dettaglioPersona(clienteId, id));
   handle('persone:save', (clienteId, id, data) => persone.salvaPersona(clienteId, id, data));
@@ -103,7 +140,8 @@ function registerIpc() {
   });
 }
 
-// Controllo promemoria: all'avvio e ogni ora (finché l'app è aperta)
+// Controllo promemoria: all'avvio, ogni 5 minuti e quando WhatsApp si collega.
+// L'invio parte solo dopo l'orario impostato (predefinito 12:00).
 let controlloInCorso = false;
 async function controllaPromemoria() {
   if (!db.isReady() || controlloInCorso) return null;
@@ -112,8 +150,8 @@ async function controllaPromemoria() {
     const esito = await promemoria.controllaTutti();
     const msg = [];
     if (esito.email) msg.push(`${esito.email} email inviate`);
-    if (esito.whatsapp) msg.push(`${esito.whatsapp} WhatsApp da inviare`);
-    if (esito.errori) msg.push(`${esito.errori} email non inviate (errore)`);
+    if (esito.whatsapp) msg.push(`${esito.whatsapp} WhatsApp inviati`);
+    if (esito.errori) msg.push(`${esito.errori} non inviati (errore)`);
     if (msg.length && Notification.isSupported()) {
       const n = new Notification({ title: 'Promemoria rate', body: msg.join(' · ') });
       n.on('click', () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } });
@@ -139,7 +177,17 @@ app.whenReady().then(async () => {
   createWindow();
   setupUpdater(() => mainWindow);
   setTimeout(controllaPromemoria, 15000);
-  setInterval(controllaPromemoria, 60 * 60 * 1000);
+  setInterval(controllaPromemoria, 5 * 60 * 1000);
+
+  // WhatsApp: stato all'interfaccia; appena connesso si inviano i messaggi in attesa
+  let eraConnesso = false;
+  whatsapp.onCambio((st) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('wa:stato', st);
+    if (st.stato === 'connesso' && !eraConnesso) setTimeout(controllaPromemoria, 3000);
+    eraConnesso = st.stato === 'connesso';
+  });
+  // se c'è già una sessione salvata, ci si ricollega da soli
+  if (whatsapp.haSessione()) whatsapp.connetti().catch((e) => log.warn('WhatsApp:', e.message));
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

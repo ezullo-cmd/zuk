@@ -324,20 +324,15 @@ async function renderHome() {
     ${
       prom.length
         ? `<div class="panel promemoria-panel">
-            <h3>🔔 Promemoria da inviare <span class="count-late">${prom.length}</span></h3>
+            <h3>🔔 Promemoria in attesa <span class="count-late">${prom.length}</span></h3>
             ${prom
               .map(
                 (x) => `<div class="prom-row ${x.stato}">
                   <div class="prom-icon">${x.canale === 'email' ? '✉️' : '💬'}</div>
                   <div class="prom-body"><div><strong>${esc(x.cognome)} ${esc(x.nome)}</strong>
                     <span class="muted">· ${esc(x.cliente_nome)} · scadenza ${fmtDate(x.scadenza)}</span></div>
-                    ${x.stato === 'errore' ? `<div class="late-days">Email non inviata: ${esc(x.errore)}</div>` : `<div class="prom-testo">${esc(x.testo)}</div>`}</div>
-                  <div class="prom-actions">${
-                    x.canale === 'whatsapp'
-                      ? `<button class="btn small wa-btn" data-home-wa="${x.cliente_id}:${x.id}">Invia su WhatsApp</button>
-                         <button class="btn small" data-home-ok="${x.cliente_id}:${x.id}">Segna come inviato</button>`
-                      : `<button class="btn small" data-cliente="${x.cliente_id}" data-tab="pagamenti">Apri</button>`
-                  }</div>
+                    ${statoPromemoria(x)}</div>
+                  <div class="prom-actions"><button class="btn small" data-cliente="${x.cliente_id}" data-tab="pagamenti">Apri</button></div>
                 </div>`
               )
               .join('')}
@@ -364,19 +359,13 @@ async function renderHome() {
     </div>`;
 }
 
-// pulsanti promemoria nella Home
-document.addEventListener('click', async (e) => {
-  const wa = e.target.closest('[data-home-wa]');
-  const ok = e.target.closest('[data-home-ok]');
-  const b = wa || ok;
-  if (!b) return;
-  const [cid, id] = (wa ? b.dataset.homeWa : b.dataset.homeOk).split(':').map(Number);
-  if (wa) await safe(() => api.promemoria.whatsapp(cid, id));
-  else {
-    await safe(() => api.promemoria.segnaInviato(cid, id));
-    renderHome();
-  }
-});
+// stato leggibile di un promemoria non ancora inviato
+function statoPromemoria(x) {
+  if (x.stato === 'errore') return `<div class="late-days">Non inviato: ${esc(x.errore)}</div>`;
+  if (x.canale === 'whatsapp' && waStato.stato !== 'connesso')
+    return '<div class="small warn-text">In attesa: WhatsApp non connesso (pulsante in basso a sinistra)</div>';
+  return '<div class="muted small">In coda per l\'invio</div>';
+}
 
 // quando il controllo automatico crea nuovi promemoria, aggiorna la pagina se è pertinente
 api.promemoria.onAggiornati((esito) => {
@@ -403,32 +392,12 @@ const CLIENTE_FIELDS = [
   { name: 'promemoria_testo', label: 'Testo del promemoria', type: 'textarea' },
   { name: 'segnaposto', type: 'html' },
   { name: 'promemoria_oggetto', label: 'Oggetto dell\'email', full: true },
-  { type: 'heading', label: 'Invio email (per chi ha scelto le comunicazioni via email)' },
-  { name: 'smtp_user', label: 'Indirizzo email mittente' },
-  { name: 'smtp_password', label: 'Password (per Gmail: "password per le app")', type: 'password' },
-  { name: 'smtp_host', label: 'Server SMTP (es. smtp.gmail.com)' },
-  { name: 'smtp_port', label: 'Porta', type: 'number' },
-  { name: 'smtp_mittente', label: 'Nome mittente (es. Gianmarco Personal Trainer)' },
-  { name: 'smtp_secure', label: 'Connessione SSL (porta 465)', type: 'checkbox' },
-  { name: 'prova_email', type: 'html' }
+  { name: 'promemoria_mittente', label: 'Nome del mittente nelle email (es. Gianmarco Personal Trainer)', full: true }
 ];
-
-const SMTP_NOTI = {
-  'gmail.com': ['smtp.gmail.com', 587], 'googlemail.com': ['smtp.gmail.com', 587],
-  'outlook.com': ['smtp-mail.outlook.com', 587], 'hotmail.com': ['smtp-mail.outlook.com', 587], 'hotmail.it': ['smtp-mail.outlook.com', 587],
-  'libero.it': ['smtp.libero.it', 465], 'yahoo.com': ['smtp.mail.yahoo.com', 465], 'yahoo.it': ['smtp.mail.yahoo.com', 465],
-  'aruba.it': ['smtps.aruba.it', 465], 'icloud.com': ['smtp.mail.me.com', 587]
-};
-
-const smtpDaForm = (d) => ({
-  host: d.smtp_host, port: Number(d.smtp_port) || 587, secure: !!d.smtp_secure,
-  user: d.smtp_user, password: d.smtp_password, mittente: d.smtp_mittente
-});
 
 async function editCliente(cliente) {
   const fields = CLIENTE_FIELDS.map((f) => (typeof f.options === 'function' ? { ...f, options: f.options() } : f));
   const def = await api.promemoria.defaults();
-  const smtp = cliente?.smtp || {};
   openForm({
     title: cliente ? 'Modifica cliente' : 'Nuovo cliente',
     fields,
@@ -436,8 +405,7 @@ async function editCliente(cliente) {
       ...(cliente || { colore: PALETTE[clienti.length % PALETTE.length], sezioni: [] }),
       promemoria_testo: cliente?.promemoria_testo || def.testo,
       promemoria_oggetto: cliente?.promemoria_oggetto || def.oggetto,
-      smtp_host: smtp.host || '', smtp_port: smtp.port || 587, smtp_secure: !!smtp.secure,
-      smtp_user: smtp.user || '', smtp_password: smtp.password || '', smtp_mittente: smtp.mittente || ''
+      promemoria_mittente: cliente?.promemoria_mittente || cliente?.nome || ''
     },
     onInput: (v, form) => {
       const seg = $('#segnaposto');
@@ -446,33 +414,9 @@ async function editCliente(cliente) {
           <code>&lt;tipo percorso&gt;</code> <code>&lt;importo&gt;</code> <code>&lt;numero rata&gt;</code>
           · <a class="link" id="testo-default">ripristina testo predefinito</a></div>`;
       $('#testo-default').onclick = () => { form.elements.promemoria_testo.value = def.testo; };
-      // compila server e porta per i provider più comuni
-      const dominio = (v.smtp_user.split('@')[1] || '').toLowerCase();
-      if (SMTP_NOTI[dominio] && !form.elements.smtp_host.value) {
-        form.elements.smtp_host.value = SMTP_NOTI[dominio][0];
-        form.elements.smtp_port.value = SMTP_NOTI[dominio][1];
-        form.elements.smtp_secure.checked = SMTP_NOTI[dominio][1] === 465;
-      }
-      const prova = $('#prova_email');
-      if (!prova.innerHTML) {
-        prova.innerHTML = '<button type="button" class="btn small" id="btn-prova-email">Invia email di prova a me stesso</button>';
-        $('#btn-prova-email').onclick = async () => {
-          const d = Object.fromEntries([...new FormData(form)].map(([k, x]) => [k, x]));
-          d.smtp_secure = form.elements.smtp_secure.checked;
-          if (!d.smtp_user) return toast('Inserisci l\'indirizzo email mittente', true);
-          toast('Invio in corso…');
-          try {
-            await api.promemoria.prova(smtpDaForm(d), d.smtp_user);
-            toast(`Email di prova inviata a ${d.smtp_user}`);
-          } catch (e) {
-            toast('Invio non riuscito: ' + e.message, true);
-          }
-        };
-      }
     },
     onSubmit: async (d) => {
-      const data = Object.fromEntries(Object.entries(d).filter(([k]) => !k.startsWith('smtp_')));
-      data.smtp = d.smtp_host ? smtpDaForm(d) : null;
+      const data = d;
       const saved = cliente ? await api.clienti.update(cliente.id, data) : await api.clienti.create(data);
       toast(cliente ? 'Cliente aggiornato' : 'Cliente creato (database dedicato pronto)');
       await loadClienti();
@@ -686,6 +630,7 @@ async function renderSection(cliente, table) {
 // ---------- Impostazioni ----------------------------------------------------
 async function renderSettings() {
   const cfg = await api.settings.get();
+  const em = await api.email.get();
   const info = await api.appInfo();
   const db = cfg.db;
   content.innerHTML = `
@@ -710,6 +655,29 @@ async function renderSettings() {
           <button type="submit" class="btn primary">Salva e connetti</button>
         </div>
       </form>
+    </div>
+    <div class="panel">
+      <h3>Email per i promemoria</h3>
+      <p class="muted">I promemoria via email di tutti i clienti partono da questa casella. Il nome del mittente si imposta per ogni cliente.
+        Per Gmail serve una <strong>password per le app</strong> (non la password normale):
+        Account Google → Sicurezza → Verifica in due passaggi (attiva) → <em>Password per le app</em> → crea “Zuk Gestionale” e copia il codice di 16 lettere.</p>
+      <form id="email-form" class="form-grid">
+        <label>Indirizzo Gmail<input name="user" type="email" value="${esc(em.user)}" placeholder="nome@gmail.com" required></label>
+        <label>Password per le app<input name="password" type="password" placeholder="${em.haPassword ? '•••••••• (salvata, lascia vuoto per non cambiarla)' : 'xxxx xxxx xxxx xxxx'}"></label>
+        <label>Orario di invio promemoria<input name="orario" type="time" value="${esc(em.orario || '12:00')}" required></label>
+        <details class="full"><summary class="muted">Altro provider (non Gmail)</summary>
+          <div class="form-grid" style="margin-top:8px">
+            <label>Server SMTP<input name="host" value="${esc(em.host)}"></label>
+            <label>Porta<input name="port" type="number" value="${esc(em.port)}"></label>
+            <label class="check full"><input type="checkbox" name="secure" ${em.secure ? 'checked' : ''}> Connessione SSL</label>
+          </div>
+        </details>
+        <div class="btn-row full">
+          <button type="button" class="btn" id="btn-email-prova">Invia email di prova a me stesso</button>
+          <button type="submit" class="btn primary">Salva</button>
+        </div>
+      </form>
+      <p class="muted small">La password resta solo su questo computer, cifrata. Email e WhatsApp partono dall'orario indicato, 5 giorni lavorativi prima di ogni scadenza, se l'app è aperta.</p>
     </div>
     <div class="panel">
       <h3>Aggiornamenti</h3>
@@ -756,6 +724,28 @@ async function renderSettings() {
     renderSettings();
   };
   $('#btn-check-update').onclick = () => api.updater.check();
+  const ef = $('#email-form');
+  const leggiEmail = () => ({
+    user: ef.user.value.trim(), password: ef.password.value, orario: ef.orario.value,
+    host: ef.host.value.trim() || 'smtp.gmail.com', port: Number(ef.port.value) || 465, secure: ef.secure.checked
+  });
+  ef.onsubmit = async (e) => {
+    e.preventDefault();
+    await safe(() => api.email.save(leggiEmail()));
+    toast('Impostazioni email salvate');
+    renderSettings();
+  };
+  $('#btn-email-prova').onclick = async () => {
+    const d = leggiEmail();
+    if (!d.user) return toast('Inserisci l\'indirizzo Gmail', true);
+    toast('Invio in corso…');
+    try {
+      await api.email.prova(d);
+      toast(`Email di prova inviata a ${d.user}: controlla la posta`);
+    } catch (err) {
+      toast('Invio non riuscito: ' + err.message, true);
+    }
+  };
 }
 
 // ---------- Aggiornamenti ---------------------------------------------------
@@ -796,10 +786,78 @@ api.updater.onEvent((ev) => {
   }
 });
 
+// ---------- WhatsApp Web ----------------------------------------------------
+let waStato = { stato: 'disconnesso' };
+const waDialog = $('#wa-dialog');
+
+function formattaNumero(n) {
+  return n ? '+' + n.replace(/^(\d{2})(\d{3})(\d+)$/, '$1 $2 $3') : '';
+}
+
+function aggiornaWhatsApp(st) {
+  waStato = st;
+  const btn = $('#wa-btn');
+  btn.className = 'wa-status ' + st.stato;
+  $('#wa-label').textContent = {
+    connesso: `WhatsApp connesso${st.numero ? ' · ' + formattaNumero(st.numero) : ''}`,
+    qr: 'In attesa della scansione…',
+    connessione: 'Collegamento WhatsApp…',
+    disconnesso: 'Connetti WhatsApp Web'
+  }[st.stato];
+  if (waDialog.open) disegnaDialogWhatsApp();
+}
+
+function disegnaDialogWhatsApp() {
+  const st = waStato;
+  const body = $('#wa-body');
+  const actions = $('#wa-actions');
+  if (st.stato === 'connesso') {
+    body.innerHTML = `<div class="wa-ok">✅ Connesso come <strong>${esc(formattaNumero(st.numero))}</strong></div>
+      <p class="muted">I promemoria WhatsApp partono in automatico dall'orario impostato. Se l'app è chiusa o WhatsApp è disconnesso, i messaggi restano in attesa e partono al prossimo collegamento.</p>`;
+    actions.innerHTML = '<button class="btn danger" id="wa-logout">Disconnetti</button><button class="btn primary" id="wa-close">Chiudi</button>';
+  } else if (st.stato === 'qr' && st.qr) {
+    body.innerHTML = `<div class="wa-qr"><img src="${st.qr}" alt="QR code"></div>
+      <ol class="wa-steps"><li>Apri WhatsApp sul telefono</li><li>Tocca <strong>⋮</strong> o <strong>Impostazioni</strong> → <strong>Dispositivi collegati</strong></li>
+      <li>Tocca <strong>Collega un dispositivo</strong> e inquadra il codice</li></ol>`;
+    actions.innerHTML = '<button class="btn" id="wa-cancel">Annulla</button>';
+  } else if (st.stato === 'connessione') {
+    body.innerHTML = '<p class="muted">Collegamento in corso…</p>';
+    actions.innerHTML = '<button class="btn" id="wa-cancel">Annulla</button>';
+  } else {
+    body.innerHTML = `${st.errore ? `<p class="late-days">${esc(st.errore)}</p>` : ''}
+      <p>Collega il WhatsApp da cui inviare i promemoria. Finché non è connesso, i messaggi WhatsApp non partono.</p>
+      <p class="muted small">Il collegamento usa WhatsApp Web come “dispositivo collegato”. Non è un servizio ufficiale di Meta: usalo solo per messaggi a persone che ti conoscono, senza invii di massa.</p>`;
+    actions.innerHTML = '<button class="btn" id="wa-close">Chiudi</button><button class="btn primary" id="wa-connect">Mostra QR code</button>';
+  }
+  const on = (id, fn) => { const b = $('#' + id); if (b) b.onclick = fn; };
+  on('wa-close', () => waDialog.close());
+  on('wa-connect', () => safe(() => api.whatsapp.connetti()));
+  on('wa-cancel', async () => { await api.whatsapp.annulla(); waDialog.close(); });
+  on('wa-logout', async () => {
+    if (!confirm('Disconnettere WhatsApp? Per ricollegarlo dovrai scansionare di nuovo il QR code.')) return;
+    await safe(() => api.whatsapp.disconnetti());
+  });
+}
+
+$('#wa-btn').onclick = async () => {
+  disegnaDialogWhatsApp();
+  waDialog.showModal();
+  if (waStato.stato === 'disconnesso') safe(() => api.whatsapp.connetti());
+};
+api.whatsapp.onStato((st) => {
+  const prima = waStato.stato;
+  aggiornaWhatsApp(st);
+  if (st.stato === 'connesso' && prima !== 'connesso') {
+    toast('WhatsApp connesso');
+    setTimeout(() => waDialog.open && waStato.stato === 'connesso' && waDialog.close(), 2500);
+  }
+});
+
 // ---------- Avvio -----------------------------------------------------------
 window.addEventListener('DOMContentLoaded', async () => {
   const info = await api.appInfo();
   $('#app-version').textContent = info.version;
+  api.whatsapp.stato().then(aggiornaWhatsApp).catch(() => {});
   await loadClienti();
   go({ name: info.dbReady ? 'home' : 'settings' });
   // all'apertura: notifica di sistema se ci sono rate in ritardo

@@ -38,11 +38,20 @@ contextBridge.exposeInMainWorld('api', {
     daInviare: () => call('promemoria:daInviare'),
     check: () => call('promemoria:check'),
     segnaInviato: (clienteId, id) => call('promemoria:inviato', clienteId, id),
-    riprova: (clienteId, id) => call('promemoria:riprova', clienteId, id),
-    remove: (clienteId, id) => call('promemoria:delete', clienteId, id),
-    prova: (smtp, a) => call('promemoria:prova', smtp, a),
-    whatsapp: (clienteId, id) => call('promemoria:whatsapp', clienteId, id),
+    rimettiInCoda: (clienteId, id) => call('promemoria:rimetti', clienteId, id),
     onAggiornati: (cb) => ipcRenderer.on('promemoria:aggiornati', (_e, esito) => cb(esito))
+  },
+  email: {
+    get: () => call('email:get'),
+    save: (data) => call('email:save', data),
+    prova: (data) => call('email:prova', data)
+  },
+  whatsapp: {
+    stato: () => call('wa:stato'),
+    connetti: () => call('wa:connetti'),
+    annulla: () => call('wa:annulla'),
+    disconnetti: () => call('wa:disconnetti'),
+    onStato: (cb) => ipcRenderer.on('wa:stato', (_e, st) => cb(st))
   },
   rate: {
     list: (clienteId) => call('rate:list', clienteId)

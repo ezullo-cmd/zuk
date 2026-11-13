@@ -92,7 +92,9 @@ const MASTER_MIGRATIONS = [
   `ALTER TABLE clienti ADD COLUMN promemoria_attivi BOOLEAN NOT NULL DEFAULT false;
    ALTER TABLE clienti ADD COLUMN promemoria_testo TEXT;
    ALTER TABLE clienti ADD COLUMN promemoria_oggetto TEXT;
-   ALTER TABLE clienti ADD COLUMN smtp JSONB`
+   ALTER TABLE clienti ADD COLUMN smtp JSONB`,
+  // v5: nome del mittente nei promemoria (la casella email è unica, nelle Impostazioni dell'app)
+  `ALTER TABLE clienti ADD COLUMN promemoria_mittente TEXT`
 ];
 
 const CLIENT_MIGRATIONS = [
@@ -214,7 +216,9 @@ const CLIENT_MIGRATIONS = [
      errore       TEXT,
      creato_il    TIMESTAMPTZ NOT NULL DEFAULT now(),
      inviato_il   TIMESTAMPTZ
-   );`
+   );`,
+  // v6: ultimo tentativo di invio (gli errori si ritentano al massimo una volta l'ora)
+  `ALTER TABLE promemoria ADD COLUMN ultimo_tentativo TIMESTAMPTZ`
 ];
 
 async function migrate(pool, migrations) {
@@ -278,7 +282,7 @@ async function poolForCliente(clienteId) {
 
 const CLIENTE_FIELDS = [
   'nome', 'email', 'telefono', 'partita_iva', 'indirizzo', 'note', 'colore', 'sezioni', 'logo',
-  'promemoria_attivi', 'promemoria_testo', 'promemoria_oggetto', 'smtp'
+  'promemoria_attivi', 'promemoria_testo', 'promemoria_oggetto', 'promemoria_mittente'
 ];
 
 // Sezioni che si possono attivare nella pagina di un cliente
