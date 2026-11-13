@@ -171,7 +171,24 @@ const CLIENT_MIGRATIONS = [
    ALTER TABLE appuntamenti ADD COLUMN persona_id INT REFERENCES persone(id) ON DELETE SET NULL;
    ALTER TABLE appuntamenti ADD COLUMN stato TEXT NOT NULL DEFAULT 'programmato';
    ALTER TABLE appuntamenti ALTER COLUMN titolo DROP NOT NULL;
-   CREATE INDEX appuntamenti_persona_idx ON appuntamenti (persona_id, inizio);`
+   CREATE INDEX appuntamenti_persona_idx ON appuntamenti (persona_id, inizio);`,
+  // v3: percorsi (personal trainer / nutrizione) con durata e pagamento unico o a rate
+  `CREATE TABLE percorsi (
+     id             SERIAL PRIMARY KEY,
+     persona_id     INT NOT NULL REFERENCES persone(id) ON DELETE CASCADE,
+     tipo           TEXT NOT NULL,
+     data_inizio    DATE NOT NULL,
+     durata_mesi    INT NOT NULL CHECK (durata_mesi > 0),
+     importo_totale NUMERIC(10,2),
+     modalita       TEXT NOT NULL DEFAULT 'unica',
+     numero_rate    INT NOT NULL DEFAULT 1 CHECK (numero_rate > 0),
+     note           TEXT,
+     creato_il      TIMESTAMPTZ NOT NULL DEFAULT now()
+   );
+   ALTER TABLE pagamenti ADD COLUMN percorso_id INT REFERENCES percorsi(id) ON DELETE CASCADE;
+   ALTER TABLE pagamenti ADD COLUMN numero_rata INT;
+   ALTER TABLE pagamenti ADD CONSTRAINT pagamenti_rata_unica UNIQUE (percorso_id, numero_rata);
+   ALTER TABLE persone ALTER COLUMN tipo_pagamento SET DEFAULT 'percorso';`
 ];
 
 async function migrate(pool, migrations) {
@@ -321,8 +338,12 @@ const TABLES = {
     order: 'cognome, nome'
   },
   pagamenti: {
-    fields: ['persona_id', 'periodo', 'importo', 'pagato_il', 'metodo', 'esente', 'documento_id', 'note'],
+    fields: ['persona_id', 'periodo', 'importo', 'pagato_il', 'metodo', 'esente', 'documento_id', 'note', 'percorso_id', 'numero_rata'],
     order: 'periodo DESC NULLS LAST, pagato_il DESC'
+  },
+  percorsi: {
+    fields: ['persona_id', 'tipo', 'data_inizio', 'durata_mesi', 'importo_totale', 'modalita', 'numero_rate', 'note'],
+    order: 'data_inizio DESC'
   }
 };
 

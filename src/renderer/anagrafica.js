@@ -19,6 +19,15 @@ const METODI = [['', '—'], ['contanti', 'Contanti'], ['bonifico', 'Bonifico'],
 const STATI_PERSONA = [['attivo', 'Attivo'], ['sospeso', 'Sospeso'], ['cessato', 'Cessato']];
 const ACCEPT_DOC = 'application/pdf,image/*';
 
+const TIPI_PERCORSO = [['personal', 'Personal trainer'], ['nutrizione', 'Nutrizione'], ['personal_nutrizione', 'Personal trainer + Nutrizione']];
+const DURATE_MESI = [1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 18, 24].map((n) => [String(n), n === 1 ? '1 mese' : `${n} mesi`]);
+const NUM_RATE = Array.from({ length: 11 }, (_, i) => [String(i + 2), `${i + 2} rate`]);
+const STATI_PERCORSO = {
+  in_corso: '<span class="badge app-programmato">In corso</span>',
+  futuro: '<span class="badge annullata">Da iniziare</span>',
+  concluso: '<span class="badge annullata">Concluso</span>'
+};
+
 const label = (list, k) => (list.find(([v]) => v === k) || [, k || ''])[1];
 const tipoBreve = (k) => label(TIPI_PAGAMENTO, k).replace(/ \(.*\)/, '');
 
@@ -42,22 +51,65 @@ const PERSONA_FIELDS = [
   { name: 'peso_kg', label: 'Peso iniziale (kg)', type: 'number', step: '0.1' },
   { name: 'condizioni_salute', label: 'Patologie, infortuni, limitazioni', type: 'textarea' },
 
-  { type: 'heading', label: 'Iscrizione e pagamento' },
+  { type: 'heading', label: 'Altro' },
   { name: 'stato', label: 'Stato', type: 'select', options: STATI_PERSONA },
-  { name: 'tipo_pagamento', label: 'Tipo di pagamento', type: 'select', options: TIPI_PAGAMENTO },
-  { name: 'data_inizio', label: 'Inizio (da qui partono le rate)', type: 'date', required: true },
-  { name: 'data_fine', label: 'Fine (vuoto = in corso)', type: 'date' },
-  { name: 'importo', label: 'Importo della rata (€)', type: 'number', step: '0.01' },
   { name: 'metodo_pagamento', label: 'Metodo di pagamento abituale', type: 'select', options: METODI },
   { name: 'note', label: 'Note', type: 'textarea' }
 ];
 
+// Campi del percorso (con prefisso p_ quando sono nel modulo "Nuova persona")
+const percorsoFields = (px = '') => [
+  { name: px + 'tipo', label: 'Tipo di percorso', type: 'select', options: TIPI_PERCORSO, full: true },
+  { name: px + 'data_inizio', label: 'Inizio del percorso', type: 'date', required: true },
+  { name: px + 'durata_mesi', label: 'Durata del percorso', type: 'select', options: DURATE_MESI },
+  { name: px + 'importo_totale', label: 'Importo totale (€)', type: 'number', step: '0.01', required: true },
+  { name: px + 'modalita', label: 'Pagamento', type: 'select', options: [['unica', 'Unica soluzione'], ['rate', 'A rate']] },
+  { name: px + 'numero_rate', label: 'Numero di rate', type: 'select', options: NUM_RATE, showIf: { field: px + 'modalita', value: 'rate' } },
+  { name: px + 'anteprima', type: 'html' }
+];
+
+// Stessa regola del programma principale: rate uguali, distribuite sulla durata, scadenza a fine mese
+function anteprimaRate(v, px = '') {
+  const durata = Number(v[px + 'durata_mesi']);
+  const n = v[px + 'modalita'] === 'rate' ? Number(v[px + 'numero_rate']) : 1;
+  const tot = Number(v[px + 'importo_totale']);
+  if (!v[px + 'data_inizio'] || !durata || !n) return '';
+  const [y, m, d] = v[px + 'data_inizio'].split('-').map(Number);
+  const passo = Math.max(1, Math.floor(durata / n));
+  const base = Math.floor((tot / n) * 100) / 100;
+  const fine = new Date(y, m - 1 + durata, d);
+  if (fine.getDate() !== d) fine.setDate(0); else fine.setDate(fine.getDate() - 1);
+  const rate = Array.from({ length: n }, (_, i) => {
+    const sc = new Date(y, m + i * passo, 0);
+    const imp = tot ? (i === n - 1 ? Math.round((tot - base * (n - 1)) * 100) / 100 : base) : null;
+    return `<li><span>${n === 1 ? 'Unica soluzione' : `Rata ${i + 1}`}</span><span>entro il ${sc.toLocaleDateString('it-IT')}</span><strong>${imp !== null ? eur(imp) : ''}</strong></li>`;
+  });
+  return `<div class="anteprima"><div class="muted">Il percorso termina il <strong>${fine.toLocaleDateString('it-IT')}</strong>. Scadenze:</div><ul>${rate.join('')}</ul></div>`;
+}
+
+const percorsoDaForm = (d, px = '') => ({
+  tipo: d[px + 'tipo'],
+  data_inizio: d[px + 'data_inizio'],
+  durata_mesi: Number(d[px + 'durata_mesi']),
+  importo_totale: d[px + 'importo_totale'],
+  modalita: d[px + 'modalita'],
+  numero_rate: d[px + 'modalita'] === 'rate' ? Number(d[px + 'numero_rate']) : 1
+});
+
+const oggiISO = () => new Date().toISOString().slice(0, 10);
+
 function editPersona(cliente, persona, onDone) {
+  const nuovo = !persona;
   openForm({
     title: persona ? `Modifica ${persona.nome} ${persona.cognome}` : 'Nuova persona',
-    fields: PERSONA_FIELDS,
-    values: persona || { stato: 'attivo', tipo_pagamento: 'mensile', data_inizio: new Date().toISOString().slice(0, 10) },
-    onSubmit: async (data) => {
+    fields: nuovo ? [...PERSONA_FIELDS, { type: 'heading', label: 'Percorso' }, ...percorsoFields('p_')] : PERSONA_FIELDS,
+    values: persona || {
+      stato: 'attivo', p_tipo: 'personal', p_data_inizio: oggiISO(), p_durata_mesi: '3', p_modalita: 'unica', p_numero_rate: '3'
+    },
+    onInput: nuovo ? (v) => { $('#p_anteprima').innerHTML = anteprimaRate(v, 'p_'); } : undefined,
+    onSubmit: async (d) => {
+      const data = Object.fromEntries(Object.entries(d).filter(([k]) => !k.startsWith('p_')));
+      if (nuovo) data.percorso = percorsoDaForm(d, 'p_');
       const saved = await api.persone.save(cliente.id, persona?.id, data);
       toast(persona ? 'Dati aggiornati' : 'Persona aggiunta');
       onDone(saved);
@@ -65,8 +117,42 @@ function editPersona(cliente, persona, onDone) {
   });
 }
 
+function editPercorso(cliente, persona, percorso, onDone, precedente) {
+  let values;
+  if (percorso) values = { ...percorso, durata_mesi: String(percorso.durata_mesi), numero_rate: String(percorso.numero_rate) };
+  else if (precedente) {
+    // rinnovo: riparte il giorno dopo la fine del percorso precedente, con le stesse condizioni
+    const f = new Date(precedente.fine + 'T00:00:00');
+    f.setDate(f.getDate() + 1);
+    const inizio = `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, '0')}-${String(f.getDate()).padStart(2, '0')}`;
+    values = { ...precedente, id: undefined, data_inizio: inizio > oggiISO() ? inizio : oggiISO(), durata_mesi: String(precedente.durata_mesi), numero_rate: String(precedente.numero_rate) };
+  } else values = { tipo: 'personal', data_inizio: oggiISO(), durata_mesi: '3', modalita: 'unica', numero_rate: '3' };
+  openForm({
+    title: percorso ? 'Modifica percorso' : precedente ? 'Rinnovo percorso' : 'Nuovo percorso',
+    fields: [...percorsoFields(), { name: 'note', label: 'Note', type: 'textarea' }],
+    values,
+    onInput: (v) => { $('#anteprima').innerHTML = anteprimaRate(v); },
+    onSubmit: async (d) => {
+      await api.percorsi.save(cliente.id, percorso?.id, { ...percorsoDaForm(d), note: d.note, persona_id: persona.id });
+      toast(percorso ? 'Percorso aggiornato' : 'Percorso creato');
+      onDone();
+    }
+  });
+}
+
+function badgePercorso(pa) {
+  if (!pa) return '<span class="muted">Nessun percorso</span>';
+  let extra = '';
+  if (pa.stato === 'in_corso' && pa.giorniAllaFine <= 14)
+    extra = ` <span class="badge warn">${pa.giorniAllaFine <= 0 ? 'Termina oggi' : `Termina tra ${pa.giorniAllaFine} gg`}</span>`;
+  else if (pa.stato === 'concluso') extra = ' <span class="badge annullata">Concluso</span>';
+  else if (pa.stato === 'futuro') extra = ' <span class="badge annullata">Da iniziare</span>';
+  return `${esc(label(TIPI_PERCORSO, pa.tipo))}<div class="muted small">fino al ${fmtDate(pa.fine)}${extra}</div>`;
+}
+
 /** Etichetta del periodo coperto da una rata: "novembre 2026" o "ottobre – dicembre 2026". */
 function periodoLabel(r) {
+  if (r.etichetta) return r.etichetta;
   if (!r.periodo) return 'Pagamento extra';
   if (!r.fino_al || r.fino_al.slice(0, 7) === r.periodo.slice(0, 7)) return meseLabel(r.periodo);
   const da = new Date(r.periodo + 'T00:00:00');
@@ -113,7 +199,7 @@ async function renderElencoPersone(cliente, el) {
       <button class="btn primary" id="btn-add-persona">＋ Nuova persona</button>
     </div>
     <div class="table-wrap"><table class="clickable">
-      <thead><tr><th>Nome</th><th>Telefono</th><th>Pagamento</th><th>Situazione rate</th><th>Ultimo appuntamento</th><th>Prossimo</th></tr></thead>
+      <thead><tr><th>Nome</th><th>Telefono</th><th>Percorso</th><th>Situazione rate</th><th>Ultimo appuntamento</th><th>Prossimo</th></tr></thead>
       <tbody>${
         lista.length
           ? lista
@@ -123,7 +209,7 @@ async function renderElencoPersone(cliente, el) {
                     ${p.stato !== 'attivo' ? ` <span class="badge annullata">${esc(label(STATI_PERSONA, p.stato))}</span>` : ''}
                     ${p.situazione.certificatoScaduto ? ' <span class="badge late" title="Certificato medico scaduto">Certificato scaduto</span>' : ''}</td>
                   <td>${esc(p.telefono)}</td>
-                  <td>${esc(tipoBreve(p.tipo_pagamento))}${p.importo ? ` · ${eur(p.importo)}` : ''}</td>
+                  <td>${p.situazione.percorsoAttuale || !MESI_TIPO[p.tipo_pagamento] ? badgePercorso(p.situazione.percorsoAttuale) : `${esc(tipoBreve(p.tipo_pagamento))}${p.importo ? ` · ${eur(p.importo)}` : ''}`}</td>
                   <td>${badgePagamenti(p.situazione)}${p.situazione.ricevuteMancanti ? ` <span class="badge warn" title="Pagamenti senza ricevuta">${p.situazione.ricevuteMancanti} senza ricevuta</span>` : ''}</td>
                   <td>${p.situazione.ultimoAppuntamento ? fmtDate(p.situazione.ultimoAppuntamento) : '<span class="muted">—</span>'}</td>
                   <td>${p.situazione.prossimoAppuntamento ? fmtDateTime(p.situazione.prossimoAppuntamento) : '<span class="muted">—</span>'}</td>
@@ -158,7 +244,12 @@ function apriPersona(personaId) {
 async function renderPersona(cliente, el, personaId) {
   const d = await safe(() => api.persone.get(cliente.id, personaId));
   const p = d.persona;
-  const s = d.pagamenti;
+  const s = d.situazione;
+  const legacy = s.legacy;
+  // tutte le rate della pagina in un unico elenco: i pulsanti fanno riferimento all'indice
+  const rateFlat = [...s.percorsi.flatMap((x) => x.rate), ...legacy.rate];
+  let offset = 0;
+  const tab = (rows) => { const html = tabellaRate(rows, offset); offset += rows.length; return html; };
   const refresh = () => renderPersona(cliente, el, personaId);
   const now = new Date();
   const prossimi = d.appuntamenti.filter((a) => new Date(a.inizio) > now).reverse();
@@ -169,8 +260,9 @@ async function renderPersona(cliente, el, personaId) {
     ['Codice fiscale', p.codice_fiscale], ['Indirizzo', p.indirizzo], ['Contatto di emergenza', p.contatto_emergenza],
     ['Obiettivo', p.obiettivo], ['Livello', p.livello], ['Altezza', p.altezza_cm && `${p.altezza_cm} cm`], ['Peso iniziale', p.peso_kg && `${p.peso_kg} kg`],
     ['Certificato medico', p.certificato_scadenza && `scade il ${fmtDate(p.certificato_scadenza)}${d.certificatoScaduto ? ' — SCADUTO' : ''}`],
-    ['Iscritto dal', fmtDate(p.data_inizio)], ['Fine', p.data_fine && fmtDate(p.data_fine)],
-    ['Pagamento', `${tipoBreve(p.tipo_pagamento)}${p.importo ? ` · ${eur(p.importo)}` : ''}${p.metodo_pagamento ? ` · ${label(METODI, p.metodo_pagamento)}` : ''}`]
+    ['Cliente dal', fmtDate(p.data_inizio)],
+    ['Pagamento abituale', p.metodo_pagamento && label(METODI, p.metodo_pagamento)],
+    ...(MESI_TIPO[p.tipo_pagamento] ? [['Abbonamento', `${tipoBreve(p.tipo_pagamento)}${p.importo ? ` · ${eur(p.importo)}` : ''}`]] : [])
   ].filter(([, v]) => v);
 
   el.innerHTML = `
@@ -205,15 +297,45 @@ async function renderPersona(cliente, el, personaId) {
 
     <div class="panel">
       <div class="panel-head">
-        <h3>Rate e pagamenti</h3>
-        <button class="btn small" id="btn-extra">＋ Pagamento ${MESI_TIPO[p.tipo_pagamento] ? 'extra' : ''}</button>
+        <h3>Percorsi e pagamenti</h3>
+        <div class="btn-row">
+          ${s.percorsi.length ? '<button class="btn small" id="btn-rinnovo">↻ Rinnova percorso</button>' : ''}
+          <button class="btn small primary" id="btn-new-percorso">＋ Nuovo percorso</button>
+        </div>
       </div>
       ${
-        !MESI_TIPO[p.tipo_pagamento]
-          ? '<p class="muted">Con questo tipo di pagamento non ci sono scadenze automatiche: registra i pagamenti man mano.</p>'
+        s.percorsi.length
+          ? s.percorsi
+              .map(
+                (pc) => `<div class="percorso ${pc.rate.some((r) => r.stato === 'in_ritardo') ? 'late' : ''}">
+                  <div class="percorso-head">
+                    <div>
+                      <strong>${esc(label(TIPI_PERCORSO, pc.tipo))}</strong> ${STATI_PERCORSO[pc.stato]}
+                      ${pc.stato === 'in_corso' && pc.giorniAllaFine <= 14 ? `<span class="badge warn">Termina tra ${Math.max(pc.giorniAllaFine, 0)} gg</span>` : ''}
+                      <div class="muted small">
+                        ${pc.durata_mesi === 1 ? '1 mese' : `${pc.durata_mesi} mesi`} · dal ${fmtDate(pc.data_inizio)} al ${fmtDate(pc.fine)}
+                        · ${pc.importo_totale !== null ? eur(pc.importo_totale) : '—'} ${pc.modalita === 'rate' ? `in ${pc.numero_rate} rate` : 'in unica soluzione'}
+                        · pagato ${eur(pc.pagato)}
+                      </div>
+                      ${pc.note ? `<div class="muted small">${esc(pc.note)}</div>` : ''}
+                    </div>
+                    <div class="btn-row">
+                      <button class="btn small" data-perc-edit="${pc.id}">Modifica</button>
+                      <button class="btn small danger" data-perc-del="${pc.id}">Elimina</button>
+                    </div>
+                  </div>
+                  ${tab(pc.rate)}
+                </div>`
+              )
+              .join('')
+          : '<div class="muted empty-box">Nessun percorso. Crea il primo con “Nuovo percorso”.</div>'
+      }
+      ${
+        legacy.rate.length
+          ? `<h4>${MESI_TIPO[p.tipo_pagamento] ? `Abbonamento ${tipoBreve(p.tipo_pagamento).toLowerCase()}` : 'Altri pagamenti'}</h4>${tab(legacy.rate)}`
           : ''
       }
-      ${tabellaRate(s.rate)}
+      <div style="margin-top:10px"><button class="btn small ghost" id="btn-extra">＋ Altro pagamento</button></div>
     </div>
 
     <div class="panel">
@@ -249,25 +371,41 @@ async function renderPersona(cliente, el, personaId) {
   };
   $('#btn-add-app-p').onclick = () => editAppuntamento(cliente, null, { personaId: p.id, onDone: refresh });
   $('#btn-extra').onclick = () => registraPagamento(cliente, p, null, refresh);
+  $('#btn-new-percorso').onclick = () => editPercorso(cliente, p, null, refresh);
+  if ($('#btn-rinnovo')) $('#btn-rinnovo').onclick = () => editPercorso(cliente, p, null, refresh, s.percorsi[0]);
+  el.querySelectorAll('[data-perc-edit]').forEach(
+    (b) => (b.onclick = () => editPercorso(cliente, p, s.percorsi.find((x) => x.id === Number(b.dataset.percEdit)), refresh))
+  );
+  el.querySelectorAll('[data-perc-del]').forEach(
+    (b) =>
+      (b.onclick = async () => {
+        if (!confirm('Eliminare questo percorso? Verranno eliminati anche i pagamenti registrati sulle sue rate.')) return;
+        await safe(() => api.records.remove(cliente.id, 'percorsi', Number(b.dataset.percDel)));
+        toast('Percorso eliminato');
+        refresh();
+      })
+  );
   $('#btn-add-doc').onclick = () => caricaDocumento(cliente, p, refresh);
 
   collegaAzioniAppuntamenti(el, cliente, d.appuntamenti, refresh);
 
   el.querySelectorAll('[data-rata-paga]').forEach(
-    (b) => (b.onclick = () => registraPagamento(cliente, p, s.rate[Number(b.dataset.rataPaga)], refresh))
+    (b) => (b.onclick = () => registraPagamento(cliente, p, rateFlat[Number(b.dataset.rataPaga)], refresh))
   );
   el.querySelectorAll('[data-rata-esente]').forEach(
     (b) =>
       (b.onclick = async () => {
-        const r = s.rate[Number(b.dataset.rataEsente)];
+        const r = rateFlat[Number(b.dataset.rataEsente)];
         const motivo = prompt(`Segnare ${periodoLabel(r)} come non dovuta? Motivo (facoltativo):`, 'Sospensione');
         if (motivo === null) return;
-        await safe(() => api.pagamenti.save(cliente.id, { persona_id: p.id, periodo: r.periodo, esente: true, importo: 0, note: motivo }));
+        await safe(() => api.pagamenti.save(cliente.id, {
+          persona_id: p.id, periodo: r.periodo, percorso_id: r.percorso_id, numero_rata: r.numero_rata, esente: true, importo: 0, note: motivo
+        }));
         refresh();
       })
   );
   el.querySelectorAll('[data-rata-edit]').forEach(
-    (b) => (b.onclick = () => registraPagamento(cliente, p, s.rate[Number(b.dataset.rataEdit)], refresh))
+    (b) => (b.onclick = () => registraPagamento(cliente, p, rateFlat[Number(b.dataset.rataEdit)], refresh))
   );
   el.querySelectorAll('[data-rata-del]').forEach(
     (b) =>
@@ -278,7 +416,7 @@ async function renderPersona(cliente, el, personaId) {
       })
   );
   el.querySelectorAll('[data-rata-upload]').forEach(
-    (b) => (b.onclick = () => registraPagamento(cliente, p, s.rate[Number(b.dataset.rataUpload)], refresh, true))
+    (b) => (b.onclick = () => registraPagamento(cliente, p, rateFlat[Number(b.dataset.rataUpload)], refresh, true))
   );
   el.querySelectorAll('[data-doc-open]').forEach((a) => (a.onclick = () => safe(() => api.documenti.open(cliente.id, Number(a.dataset.docOpen)))));
   el.querySelectorAll('[data-doc-del]').forEach(
@@ -299,7 +437,7 @@ function eta(dataNascita) {
   return a;
 }
 
-function tabellaRate(rate) {
+function tabellaRate(rate, offset = 0) {
   if (!rate.length) return '<div class="muted empty-box">Nessuna rata.</div>';
   const statoBadge = {
     pagata: '<span class="badge pagata">Pagata</span>',
@@ -308,9 +446,10 @@ function tabellaRate(rate) {
     in_ritardo: '<span class="badge late">⚠ In ritardo</span>'
   };
   return `<div class="table-wrap"><table>
-    <thead><tr><th>Periodo</th><th>Scadenza</th><th class="num">Importo</th><th>Stato</th><th>Pagata il</th><th>Ricevuta</th><th></th></tr></thead>
+    <thead><tr><th>Rata</th><th>Scadenza</th><th class="num">Importo</th><th>Stato</th><th>Pagata il</th><th>Ricevuta</th><th></th></tr></thead>
     <tbody>${rate
-      .map((r, i) => {
+      .map((r, j) => {
+        const i = j + offset;
         const pag = r.pagamento;
         let ricevuta = '';
         if (pag?.documento_id) ricevuta = `<a class="link" data-doc-open="${pag.documento_id}">📄 Apri</a>`;
@@ -338,7 +477,7 @@ function registraPagamento(cliente, persona, rata, onDone, soloRicevuta = false)
   const fields = soloRicevuta
     ? [{ name: 'ricevuta', label: 'Ricevuta (PDF o foto)', type: 'file', accept: ACCEPT_DOC, required: true }]
     : [
-        ...(rata?.periodo ? [] : [{ name: 'periodo', label: 'Mese di riferimento (facoltativo)', type: 'month' }]),
+        ...(rata?.periodo || rata?.percorso_id ? [] : [{ name: 'periodo', label: 'Mese di riferimento (facoltativo)', type: 'month' }]),
         { name: 'importo', label: 'Importo pagato (€)', type: 'number', step: '0.01', required: true },
         { name: 'pagato_il', label: 'Pagato il', type: 'date', required: true },
         { name: 'metodo', label: 'Metodo', type: 'select', options: METODI },
@@ -348,18 +487,20 @@ function registraPagamento(cliente, persona, rata, onDone, soloRicevuta = false)
   openForm({
     title: soloRicevuta
       ? `Ricevuta · ${periodoLabel(rata)}`
-      : `${pag ? 'Modifica pagamento' : 'Registra pagamento'}${rata?.periodo ? ` · ${periodoLabel(rata)}` : ''}`,
+      : `${pag ? 'Modifica pagamento' : 'Registra pagamento'}${rata?.periodo || rata?.percorso_id ? ` · ${periodoLabel(rata)}` : ''}`,
     fields,
     values: pag
       ? { ...pag, periodo: pag.periodo?.slice(0, 7) }
       : { importo: rata?.importo ?? persona.importo ?? '', pagato_il: oggi, metodo: persona.metodo_pagamento || '' },
     onSubmit: async (data) => {
       const file = await fileDaInput(data.ricevuta);
-      const periodo = rata?.periodo || (data.periodo ? `${data.periodo}-01` : null);
+      const periodo = rata?.periodo || (!rata?.percorso_id && data.periodo ? `${data.periodo}-01` : null);
+      const rif = rata?.percorso_id ? { percorso_id: rata.percorso_id, numero_rata: rata.numero_rata } : {};
+      const descrizione_ricevuta = rata?.percorso_id ? `Ricevuta ${periodoLabel(rata).toLowerCase()} (scad. ${fmtDate(rata.scadenza)})` : undefined;
       const payload = soloRicevuta
         ? { ...pag }
-        : { ...(pag || {}), persona_id: persona.id, periodo, importo: data.importo, pagato_il: data.pagato_il, metodo: data.metodo, note: data.note, esente: false };
-      await api.pagamenti.save(cliente.id, { ...payload, persona_id: persona.id }, file);
+        : { ...(pag || {}), ...rif, persona_id: persona.id, periodo, importo: data.importo, pagato_il: data.pagato_il, metodo: data.metodo, note: data.note, esente: false };
+      await api.pagamenti.save(cliente.id, { ...payload, persona_id: persona.id, descrizione_ricevuta }, file);
       toast(soloRicevuta ? 'Ricevuta caricata' : 'Pagamento registrato');
       onDone();
     }

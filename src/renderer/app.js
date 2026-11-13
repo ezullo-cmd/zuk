@@ -51,7 +51,7 @@ async function safe(fn) {
 
 // ---------- Modale form generica -------------------------------------------
 // fields: [{ name, label, type, options, required, full, value }]
-function openForm({ title, fields, values = {}, onSubmit }) {
+function openForm({ title, fields, values = {}, onSubmit, onInput }) {
   const dlg = $('#modal');
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = fields
@@ -61,6 +61,7 @@ function openForm({ title, fields, values = {}, onSubmit }) {
       const cls = f.full || f.type === 'textarea' ? 'full' : '';
       let input;
       if (f.type === 'heading') return `<div class="form-heading">${esc(f.label)}</div>`;
+      if (f.type === 'html') return `<div class="full form-html" id="${f.name}"></div>`;
       if (f.type === 'file')
         return `<label class="${cls || 'full'}">${esc(f.label)}<input name="${f.name}" type="file" accept="${f.accept || ''}" ${req}></label>`;
       if (f.type === 'textarea') input = `<textarea name="${f.name}" ${req}>${esc(v)}</textarea>`;
@@ -105,7 +106,7 @@ function openForm({ title, fields, values = {}, onSubmit }) {
     e.preventDefault();
     const data = {};
     for (const f of fields) {
-      if (f.type === 'heading') continue;
+      if (f.type === 'heading' || f.type === 'html') continue;
       if (f.type === 'file') {
         data[f.name] = form.elements[f.name].files[0] || null;
         continue;
@@ -126,6 +127,21 @@ function openForm({ title, fields, values = {}, onSubmit }) {
     }
   };
   $('#modal-cancel').onclick = () => dlg.close();
+  // campi visibili solo se un altro campo ha un certo valore (es. numero rate solo "a rate")
+  const leggi = () => Object.fromEntries(fields.filter((f) => f.name && form.elements[f.name]).map((f) => [f.name, form.elements[f.name].value]));
+  const aggiorna = () => {
+    const v = leggi();
+    for (const f of fields.filter((x) => x.showIf)) {
+      const el = form.elements[f.name];
+      const ok = [].concat(f.showIf.value).includes(v[f.showIf.field]);
+      el.disabled = !ok;
+      el.closest('label, .field').classList.toggle('hidden', !ok);
+    }
+    if (onInput) onInput(v, form);
+  };
+  form.oninput = aggiorna;
+  form.onchange = aggiorna;
+  aggiorna();
   dlg.showModal();
 }
 
@@ -208,7 +224,7 @@ async function renderHome() {
                   (r) => `<div class="item">
                     <div><a class="link" data-cliente="${r.cliente_id}" data-tab="anagrafica" data-persona="${r.persona_id}"><strong>${esc(r.persona_nome)}</strong></a>
                       · <span class="muted">${esc(r.cliente_nome)}</span>
-                      <div class="muted">${r.rate.map((x) => meseLabel(x.periodo)).join(', ')}</div></div>
+                      <div class="muted">${r.rate.map((x) => (x.etichetta ? `${x.etichetta} (scad. ${fmtDate(x.scadenza)})` : meseLabel(x.periodo))).join(', ')}</div></div>
                     <div class="late-amount">${eur(r.rate.reduce((s, x) => s + (Number(x.importo) || 0), 0))}</div>
                   </div>`
                 )

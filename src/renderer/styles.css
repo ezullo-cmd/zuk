@@ -166,3 +166,14 @@ tr.row-muted td { opacity: .55; }
 .note-cell { max-width: 260px; color: var(--muted); }
 .small { font-size: 12px; }
 .row-actions .btn + .btn { margin-left: 4px; }
+
+/* ---- Percorsi ---- */
+.percorso { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+.percorso.late { border-color: #f3b4b4; box-shadow: inset 4px 0 0 var(--late); }
+.percorso-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+.percorso-head .badge { margin-left: 6px; }
+.anteprima { background: #f6f8fb; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 13px; }
+.anteprima ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.anteprima li { display: grid; grid-template-columns: 120px 1fr auto; gap: 10px; padding: 3px 0; border-top: 1px dashed var(--border); }
+.anteprima li:first-child { border-top: none; }
+.badge { white-space: nowrap; }

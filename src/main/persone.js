@@ -88,10 +88,109 @@ function situazioneRate(persona, pagamenti, oggi = oggiISO()) {
   const daPagare = rate.find((r) => r.stato === 'da_pagare');
   return {
     rate: tutte,
-    inRitardo: inRitardo.map((r) => ({ periodo: r.periodo, scadenza: r.scadenza, importo: r.importo })),
+    inRitardo: inRitardo.map((r) => ({ periodo: r.periodo, scadenza: r.scadenza, importo: r.importo, etichetta: null })),
     importoInRitardo: inRitardo.reduce((s, r) => s + (Number(r.importo) || 0), 0),
     prossimaScadenza: daPagare ? daPagare.scadenza : null,
     ricevuteMancanti: rate.filter((r) => r.ricevuta_mancante).length
+  };
+}
+
+// ---- Percorsi (personal trainer / nutrizione) ----------------------------------------
+const TIPI_PERCORSO = ['personal', 'nutrizione', 'personal_nutrizione'];
+const MODALITA = ['unica', 'rate'];
+
+const toUTC = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)); };
+const fromUTC = (d) => iso(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+
+/** Ultimo giorno del percorso: inizio + durata in mesi - 1 giorno (1/11 + 3 mesi -> 31/1). */
+function finePercorso(p) {
+  const [y, m, d] = p.data_inizio.split('-').map(Number);
+  const [y2, m2] = addMonths(y, m, p.durata_mesi);
+  if (d > lastDay(y2, m2)) return iso(y2, m2, lastDay(y2, m2)); // es. 31/1 + 1 mese -> 28/2
+  const fine = toUTC(iso(y2, m2, d));
+  fine.setUTCDate(fine.getUTCDate() - 1);
+  return fromUTC(fine);
+}
+
+/**
+ * Piano rate di un percorso. L'importo totale viene diviso in parti uguali
+ * (l'ultima rata assorbe gli arrotondamenti). Le rate sono distribuite lungo la durata
+ * (6 mesi in 3 rate = una ogni 2 mesi) e ognuna scade a fine mese:
+ * la 1ª a fine del mese di inizio, la 2ª a fine del mese successivo all'intervallo, ecc.
+ */
+function pianoRate(p) {
+  const n = p.modalita === 'rate' ? Math.max(1, p.numero_rate) : 1;
+  const totale = Number(p.importo_totale) || 0;
+  const base = Math.floor((totale / n) * 100) / 100;
+  const passo = Math.max(1, Math.floor(p.durata_mesi / n));
+  const [y, m] = p.data_inizio.split('-').map(Number);
+  return Array.from({ length: n }, (_, i) => {
+    const [ry, rm] = addMonths(y, m, i * passo);
+    return {
+      numero_rata: i + 1,
+      di: n,
+      scadenza: iso(ry, rm, lastDay(ry, rm)),
+      importo: p.importo_totale === null || p.importo_totale === undefined
+        ? null
+        : i === n - 1 ? Math.round((totale - base * (n - 1)) * 100) / 100 : base
+    };
+  });
+}
+
+function situazionePercorso(p, pagamenti, oggi = oggiISO()) {
+  const pag = new Map(pagamenti.filter((x) => x.percorso_id === p.id).map((x) => [x.numero_rata, x]));
+  const fine = finePercorso(p);
+  const rate = pianoRate(p).map((r) => {
+    const pg = pag.get(r.numero_rata);
+    let stato;
+    if (pg) stato = pg.esente ? 'esente' : 'pagata';
+    else if (oggi > r.scadenza) stato = 'in_ritardo';
+    else stato = 'da_pagare';
+    return {
+      ...r,
+      percorso_id: p.id,
+      periodo: null,
+      etichetta: r.di === 1 ? 'Unica soluzione' : `Rata ${r.numero_rata} di ${r.di}`,
+      stato,
+      importo: pg ? pg.importo : r.importo,
+      pagamento: pg || null,
+      ricevuta_mancante: !!pg && !pg.esente && !pg.documento_id
+    };
+  });
+  const giorniAllaFine = Math.round((toUTC(fine) - toUTC(oggi)) / 86400000);
+  const statoPercorso = oggi < p.data_inizio ? 'futuro' : oggi > fine ? 'concluso' : 'in_corso';
+  return {
+    ...p, fine, rate, stato: statoPercorso, giorniAllaFine,
+    pagato: rate.filter((r) => r.stato === 'pagata').reduce((s, r) => s + (Number(r.importo) || 0), 0)
+  };
+}
+
+/** Riepilogo di persona: percorsi + eventuale abbonamento ricorrente (vecchio modello). */
+function situazioneCompleta(persona, percorsi, pagamenti, oggi = oggiISO()) {
+  const perc = percorsi
+    .filter((p) => p.persona_id === persona.id)
+    .map((p) => situazionePercorso(p, pagamenti, oggi))
+    .sort((a, b) => b.data_inizio.localeCompare(a.data_inizio));
+  const legacy = situazioneRate(persona, pagamenti.filter((x) => !x.percorso_id), oggi);
+  const ratePerc = perc.flatMap((p) => p.rate.map((r) => ({ ...r, tipo_percorso: p.tipo })));
+  const ritardoPerc = ratePerc.filter((r) => r.stato === 'in_ritardo')
+    .map((r) => ({ periodo: null, scadenza: r.scadenza, importo: r.importo, etichetta: r.etichetta }));
+  const inRitardo = [...ritardoPerc, ...legacy.inRitardo];
+  const scadenze = [
+    ...ratePerc.filter((r) => r.stato === 'da_pagare').map((r) => r.scadenza),
+    legacy.prossimaScadenza
+  ].filter(Boolean).sort();
+  const attuale = perc.find((p) => p.stato === 'in_corso') || perc.find((p) => p.stato === 'futuro') || perc[0] || null;
+  return {
+    percorsi: perc,
+    legacy,
+    inRitardo,
+    importoInRitardo: inRitardo.reduce((s, r) => s + (Number(r.importo) || 0), 0),
+    prossimaScadenza: scadenze[0] || null,
+    ricevuteMancanti: ratePerc.filter((r) => r.ricevuta_mancante).length + legacy.ricevuteMancanti,
+    percorsoAttuale: attuale && {
+      id: attuale.id, tipo: attuale.tipo, fine: attuale.fine, stato: attuale.stato, giorniAllaFine: attuale.giorniAllaFine
+    }
   };
 }
 
@@ -127,26 +226,28 @@ function statisticheAppuntamenti(appuntamenti, now = new Date()) {
   };
 }
 
-const PAG_COLS = 'id, persona_id, periodo, importo, pagato_il, metodo, esente, documento_id, note';
+const PAG_COLS = 'id, persona_id, periodo, importo, pagato_il, metodo, esente, documento_id, note, percorso_id, numero_rata';
 const DOC_COLS = 'id, persona_id, nome_file, mime, dimensione, descrizione, caricato_il';
 
 // ---- Lettura -----------------------------------------------------------------------
 
 async function listPersone(clienteId) {
   const pool = await db.poolForCliente(clienteId);
-  const [persone, pagamenti, app] = await Promise.all([
+  const [persone, pagamenti, app, percorsi] = await Promise.all([
     pool.query('SELECT * FROM persone ORDER BY cognome, nome'),
     pool.query(`SELECT ${PAG_COLS} FROM pagamenti`),
     pool.query(`SELECT persona_id,
                        max(inizio) FILTER (WHERE inizio <= now() AND stato IN ('svolto','programmato')) AS ultimo,
                        min(inizio) FILTER (WHERE inizio > now() AND stato = 'programmato') AS prossimo
-                  FROM appuntamenti WHERE persona_id IS NOT NULL GROUP BY persona_id`)
+                  FROM appuntamenti WHERE persona_id IS NOT NULL GROUP BY persona_id`),
+    pool.query('SELECT * FROM percorsi')
   ]);
   const oggi = oggiISO();
   const appMap = new Map(app.rows.map((r) => [r.persona_id, r]));
   return persone.rows.map((p) => {
-    const s = situazioneRate(p, pagamenti.rows.filter((x) => x.persona_id === p.id), oggi);
-    delete s.rate;
+    const s = situazioneCompleta(p, percorsi.rows, pagamenti.rows.filter((x) => x.persona_id === p.id), oggi);
+    delete s.percorsi;
+    delete s.legacy;
     return {
       ...p,
       situazione: {
@@ -161,18 +262,19 @@ async function listPersone(clienteId) {
 
 async function dettaglioPersona(clienteId, personaId) {
   const pool = await db.poolForCliente(clienteId);
-  const [p, pagamenti, documenti, appuntamenti] = await Promise.all([
+  const [p, pagamenti, documenti, appuntamenti, percorsi] = await Promise.all([
     pool.query('SELECT * FROM persone WHERE id = $1', [personaId]),
     pool.query(`SELECT ${PAG_COLS} FROM pagamenti WHERE persona_id = $1`, [personaId]),
     pool.query(`SELECT ${DOC_COLS} FROM documenti WHERE persona_id = $1 ORDER BY caricato_il DESC`, [personaId]),
-    pool.query('SELECT * FROM appuntamenti WHERE persona_id = $1 ORDER BY inizio DESC', [personaId])
+    pool.query('SELECT * FROM appuntamenti WHERE persona_id = $1 ORDER BY inizio DESC', [personaId]),
+    pool.query('SELECT * FROM percorsi WHERE persona_id = $1', [personaId])
   ]);
   if (!p.rows.length) throw new Error('Persona non trovata');
   const persona = p.rows[0];
   const oggi = oggiISO();
   return {
     persona,
-    pagamenti: situazioneRate(persona, pagamenti.rows, oggi),
+    situazione: situazioneCompleta(persona, percorsi.rows, pagamenti.rows, oggi),
     certificatoScaduto: !!persona.certificato_scadenza && persona.certificato_scadenza < oggi,
     documenti: documenti.rows,
     appuntamenti: appuntamenti.rows,
@@ -210,24 +312,24 @@ async function salvaPagamento(clienteId, data, file) {
     await c.query('BEGIN');
     let documentoId = v(data.documento_id);
     if (f) {
-      const descr = data.periodo ? `Ricevuta rata ${data.periodo.slice(0, 7)}` : 'Ricevuta pagamento';
+      const descr = data.descrizione_ricevuta || (data.periodo ? `Ricevuta rata ${data.periodo.slice(0, 7)}` : 'Ricevuta pagamento');
       documentoId = (await inserisciDocumento(c, data.persona_id, f, descr)).id;
     }
     const vals = [
       data.persona_id, v(data.periodo), v(data.importo), v(data.pagato_il) || oggiISO(),
-      v(data.metodo), !!data.esente, documentoId, v(data.note)
+      v(data.metodo), !!data.esente, documentoId, v(data.note), v(data.percorso_id), v(data.numero_rata)
     ];
     let row;
     if (data.id) {
       ({ rows: [row] } = await c.query(
         `UPDATE pagamenti SET persona_id=$1, periodo=$2, importo=$3, pagato_il=$4, metodo=$5, esente=$6,
-                documento_id=$7, note=$8 WHERE id=$9 RETURNING ${PAG_COLS}`,
+                documento_id=$7, note=$8, percorso_id=$9, numero_rata=$10 WHERE id=$11 RETURNING ${PAG_COLS}`,
         [...vals, data.id]
       ));
     } else {
       ({ rows: [row] } = await c.query(
-        `INSERT INTO pagamenti (persona_id, periodo, importo, pagato_il, metodo, esente, documento_id, note)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING ${PAG_COLS}`,
+        `INSERT INTO pagamenti (persona_id, periodo, importo, pagato_il, metodo, esente, documento_id, note, percorso_id, numero_rata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING ${PAG_COLS}`,
         vals
       ));
     }
@@ -263,14 +365,46 @@ async function eliminaDocumento(clienteId, documentoId) {
 }
 
 async function salvaPersona(clienteId, id, data) {
-  // chi viene segnato come "cessato" smette di generare rate da oggi
-  if (data.stato === 'cessato' && !data.data_fine) data = { ...data, data_fine: oggiISO() };
-  if (data.tipo_pagamento && !(data.tipo_pagamento in FREQUENZE)) throw new Error('Tipo di pagamento non valido');
-  return id ? db.update(clienteId, 'persone', id, data) : db.create(clienteId, 'persone', data);
+  const { percorso, ...dati } = data;
+  // chi viene segnato come "cessato" smette di generare rate da oggi (abbonamenti ricorrenti)
+  if (dati.stato === 'cessato' && !dati.data_fine) dati.data_fine = oggiISO();
+  if (dati.tipo_pagamento && dati.tipo_pagamento !== 'percorso' && !(dati.tipo_pagamento in FREQUENZE))
+    throw new Error('Tipo di pagamento non valido');
+  if (!id && !dati.tipo_pagamento) dati.tipo_pagamento = 'percorso';
+  if (!id && percorso && !dati.data_inizio) dati.data_inizio = percorso.data_inizio;
+  if (percorso) validaPercorso(percorso);
+  const saved = id ? await db.update(clienteId, 'persone', id, dati) : await db.create(clienteId, 'persone', dati);
+  if (percorso) await salvaPercorso(clienteId, null, { ...percorso, persona_id: saved.id });
+  return saved;
+}
+
+function validaPercorso(d) {
+  if (!TIPI_PERCORSO.includes(d.tipo)) throw new Error('Tipo di percorso non valido');
+  if (!MODALITA.includes(d.modalita)) throw new Error('Modalità di pagamento non valida');
+  if (!d.data_inizio) throw new Error('Indica la data di inizio del percorso');
+  if (!(Number(d.durata_mesi) > 0)) throw new Error('Indica la durata del percorso');
+  const n = d.modalita === 'rate' ? Number(d.numero_rate) : 1;
+  if (!(n >= 1 && n <= 36)) throw new Error('Numero di rate non valido');
+  return { ...d, durata_mesi: Number(d.durata_mesi), numero_rate: n };
+}
+
+async function salvaPercorso(clienteId, id, data) {
+  const d = validaPercorso(data);
+  if (id) {
+    // se il numero di rate diminuisce, i pagamenti delle rate che non esistono più vanno rimossi a mano
+    const pool = await db.poolForCliente(clienteId);
+    const { rows } = await pool.query(
+      'SELECT count(*)::int AS n FROM pagamenti WHERE percorso_id = $1 AND numero_rata > $2', [id, d.numero_rate]
+    );
+    if (rows[0].n) throw new Error('Ci sono pagamenti registrati su rate che verrebbero eliminate: annullali prima di ridurre le rate');
+    return db.update(clienteId, 'percorsi', id, d);
+  }
+  return db.create(clienteId, 'percorsi', d);
 }
 
 module.exports = {
   FREQUENZE, periodiAttesi, situazioneRate, statisticheAppuntamenti,
-  listPersone, dettaglioPersona, salvaPersona, salvaPagamento,
+  finePercorso, pianoRate, situazionePercorso,
+  listPersone, dettaglioPersona, salvaPersona, salvaPercorso, salvaPagamento,
   caricaDocumento, leggiDocumento, eliminaDocumento
 };
