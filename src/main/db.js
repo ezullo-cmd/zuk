@@ -218,7 +218,9 @@ const CLIENT_MIGRATIONS = [
      inviato_il   TIMESTAMPTZ
    );`,
   // v6: ultimo tentativo di invio (gli errori si ritentano al massimo una volta l'ora)
-  `ALTER TABLE promemoria ADD COLUMN ultimo_tentativo TIMESTAMPTZ`
+  `ALTER TABLE promemoria ADD COLUMN ultimo_tentativo TIMESTAMPTZ`,
+  // v7: scadenza della 1ª rata scelta a mano (le successive cadono lo stesso giorno del mese)
+  `ALTER TABLE percorsi ADD COLUMN prima_scadenza DATE`
 ];
 
 async function migrate(pool, migrations) {
@@ -387,7 +389,7 @@ const TABLES = {
     order: 'periodo DESC NULLS LAST, pagato_il DESC'
   },
   percorsi: {
-    fields: ['persona_id', 'tipo', 'data_inizio', 'durata_mesi', 'importo_totale', 'modalita', 'numero_rate', 'note', 'rinnovo_di'],
+    fields: ['persona_id', 'tipo', 'data_inizio', 'durata_mesi', 'importo_totale', 'modalita', 'numero_rate', 'note', 'rinnovo_di', 'prima_scadenza'],
     order: 'data_inizio DESC'
   }
 };

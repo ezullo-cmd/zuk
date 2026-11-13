@@ -6,6 +6,7 @@
 const nodemailer = require('nodemailer');
 const db = require('./db');
 const persone = require('./persone');
+const { giorniLavorativiPrima } = require('./calendario');
 
 const GIORNI_PRIMA = 5;
 const TESTO_DEFAULT =
@@ -13,40 +14,9 @@ const TESTO_DEFAULT =
 const OGGETTO_DEFAULT = 'Promemoria scadenza rata';
 const TIPI_PERCORSO = { personal: 'Personal trainer', nutrizione: 'Nutrizione', personal_nutrizione: 'Personal trainer + Nutrizione' };
 
-// ---- Giorni lavorativi (lun-ven, escluse le festività nazionali italiane) ----------
+// ---- Data di invio: N giorni lavorativi prima della scadenza ----------------------
 const pad = (n) => String(n).padStart(2, '0');
-const isoUTC = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-
-function pasqua(y) {
-  // algoritmo di Gauss/Meeus per la domenica di Pasqua
-  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
-  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
-  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;
-  const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
-  const mese = Math.floor((h + l - 7 * m + 114) / 31), giorno = ((h + l - 7 * m + 114) % 31) + 1;
-  return new Date(Date.UTC(y, mese - 1, giorno));
-}
-
-function festivo(d) {
-  const md = isoUTC(d).slice(5);
-  if (['01-01', '01-06', '04-25', '05-01', '06-02', '08-15', '11-01', '12-08', '12-25', '12-26'].includes(md)) return true;
-  const pasquetta = pasqua(d.getUTCFullYear());
-  pasquetta.setUTCDate(pasquetta.getUTCDate() + 1);
-  return isoUTC(pasquetta) === isoUTC(d);
-}
-
-const lavorativo = (d) => d.getUTCDay() !== 0 && d.getUTCDay() !== 6 && !festivo(d);
-
-/** Data di invio: N giorni lavorativi prima della scadenza ('YYYY-MM-DD'). */
-function dataInvio(scadenza, giorni = GIORNI_PRIMA) {
-  const d = new Date(scadenza + 'T00:00:00Z');
-  let n = 0;
-  while (n < giorni) {
-    d.setUTCDate(d.getUTCDate() - 1);
-    if (lavorativo(d)) n++;
-  }
-  return isoUTC(d);
-}
+const dataInvio = (scadenza, giorni = GIORNI_PRIMA) => giorniLavorativiPrima(scadenza, giorni);
 
 // ---- Testo -------------------------------------------------------------------
 const dataIT = (iso) => iso.split('-').reverse().join('/');

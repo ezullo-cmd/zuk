@@ -124,6 +124,7 @@ function registerIpc() {
   handle('rate:list', (clienteId) => persone.listRate(clienteId));
   handle('persone:get', (clienteId, id) => persone.dettaglioPersona(clienteId, id));
   handle('persone:save', (clienteId, id, data) => persone.salvaPersona(clienteId, id, data));
+  handle('percorsi:anteprima', (data) => persone.anteprimaPercorso(data));
   handle('percorsi:save', (clienteId, id, data) => persone.salvaPercorso(clienteId, id, data));
   handle('pagamenti:save', (clienteId, data, file) => persone.salvaPagamento(clienteId, data, file));
   handle('documenti:upload', (clienteId, personaId, file, descr) => persone.caricaDocumento(clienteId, personaId, file, descr));

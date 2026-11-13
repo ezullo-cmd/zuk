@@ -1,6 +1,7 @@
 // Anagrafica delle persone (i clienti dell'attività, es. gli allievi di un personal trainer):
 // calcolo delle rate e dei ritardi, storico appuntamenti, ricevute e documenti PDF.
 const db = require('./db');
+const { ultimoLavorativo } = require('./calendario');
 
 // Mesi coperti da ogni tipo di pagamento. I tipi senza mesi non generano scadenze automatiche.
 const FREQUENZE = {
@@ -112,24 +113,34 @@ function finePercorso(p) {
   return fromUTC(fine);
 }
 
+/** Scadenza predefinita della 1ª rata: ultimo giorno lavorativo del mese di inizio. */
+function primaScadenzaPredefinita(p) {
+  const [y, m] = p.data_inizio.split('-').map(Number);
+  return ultimoLavorativo(y, m);
+}
+
 /**
  * Piano rate di un percorso. L'importo totale viene diviso in parti uguali
  * (l'ultima rata assorbe gli arrotondamenti). Le rate sono distribuite lungo la durata
- * (6 mesi in 3 rate = una ogni 2 mesi) e ognuna scade a fine mese:
- * la 1ª a fine del mese di inizio, la 2ª a fine del mese successivo all'intervallo, ecc.
+ * (6 mesi in 3 rate = una ogni 2 mesi).
+ * - Predefinito: ogni rata scade l'ultimo giorno lavorativo del suo mese.
+ * - Se è indicata la scadenza della 1ª rata (es. il 3), tutte le rate scadono quel giorno
+ *   del mese (se il mese è più corto, l'ultimo giorno del mese).
  */
 function pianoRate(p) {
   const n = p.modalita === 'rate' ? Math.max(1, p.numero_rate) : 1;
   const totale = Number(p.importo_totale) || 0;
   const base = Math.floor((totale / n) * 100) / 100;
   const passo = Math.max(1, Math.floor(p.durata_mesi / n));
-  const [y, m] = p.data_inizio.split('-').map(Number);
+  let [y, m] = p.data_inizio.split('-').map(Number);
+  let giorno = null;
+  if (p.prima_scadenza) [y, m, giorno] = p.prima_scadenza.split('-').map(Number);
   return Array.from({ length: n }, (_, i) => {
     const [ry, rm] = addMonths(y, m, i * passo);
     return {
       numero_rata: i + 1,
       di: n,
-      scadenza: iso(ry, rm, lastDay(ry, rm)),
+      scadenza: giorno ? iso(ry, rm, Math.min(giorno, lastDay(ry, rm))) : ultimoLavorativo(ry, rm),
       importo: p.importo_totale === null || p.importo_totale === undefined
         ? null
         : i === n - 1 ? Math.round((totale - base * (n - 1)) * 100) / 100 : base
@@ -440,8 +451,21 @@ function validaPercorso(d) {
   const n = d.modalita === 'rate' ? Number(d.numero_rate) : 1;
   if (!(n >= 1 && n <= 36)) throw new Error('Numero di rate non valido');
   const out = { ...d, durata_mesi: Number(d.durata_mesi), numero_rate: n };
+  // prima scadenza uguale a quella predefinita = regola "ultimo giorno lavorativo del mese"
+  if (!out.prima_scadenza || out.prima_scadenza === primaScadenzaPredefinita(out)) out.prima_scadenza = null;
   if (!out.rinnovo_di) delete out.rinnovo_di; // in modifica non si tocca il collegamento al percorso precedente
   return out;
+}
+
+/** Anteprima per il modulo: scadenze, importi e fine del percorso. */
+function anteprimaPercorso(data) {
+  if (!data?.data_inizio || !(Number(data.durata_mesi) > 0)) return null;
+  const p = {
+    ...data, durata_mesi: Number(data.durata_mesi),
+    numero_rate: data.modalita === 'rate' ? Number(data.numero_rate) || 1 : 1,
+    importo_totale: data.importo_totale === '' || data.importo_totale === undefined ? null : Number(data.importo_totale)
+  };
+  return { fine: finePercorso(p), primaPredefinita: primaScadenzaPredefinita(p), rate: pianoRate(p) };
 }
 
 async function salvaPercorso(clienteId, id, data) {
@@ -460,7 +484,7 @@ async function salvaPercorso(clienteId, id, data) {
 
 module.exports = {
   FREQUENZE, periodiAttesi, situazioneRate, statisticheAppuntamenti,
-  finePercorso, pianoRate, situazionePercorso,
+  finePercorso, pianoRate, situazionePercorso, anteprimaPercorso, primaScadenzaPredefinita,
   listPersone, listRate, dettaglioPersona, salvaPersona, salvaPercorso, salvaPagamento,
   caricaDocumento, leggiDocumento, eliminaDocumento
 };

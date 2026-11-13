@@ -69,26 +69,46 @@ const percorsoFields = (px = '') => [
   { name: px + 'importo_totale', label: 'Importo totale (€)', type: 'number', step: '0.01', required: true },
   { name: px + 'modalita', label: 'Pagamento', type: 'select', options: [['unica', 'Unica soluzione'], ['rate', 'A rate']] },
   { name: px + 'numero_rate', label: 'Numero di rate', type: 'select', options: NUM_RATE, showIf: { field: px + 'modalita', value: 'rate' } },
+  { name: px + 'prima_scadenza', label: 'Scadenza della 1ª rata', type: 'date', required: true },
   { name: px + 'anteprima', type: 'html' }
 ];
 
-// Stessa regola del programma principale: rate uguali, distribuite sulla durata, scadenza a fine mese
-function anteprimaRate(v, px = '') {
-  const durata = Number(v[px + 'durata_mesi']);
-  const n = v[px + 'modalita'] === 'rate' ? Number(v[px + 'numero_rate']) : 1;
-  const tot = Number(v[px + 'importo_totale']);
-  if (!v[px + 'data_inizio'] || !durata || !n) return '';
-  const [y, m, d] = v[px + 'data_inizio'].split('-').map(Number);
-  const passo = Math.max(1, Math.floor(durata / n));
-  const base = Math.floor((tot / n) * 100) / 100;
-  const fine = new Date(y, m - 1 + durata, d);
-  if (fine.getDate() !== d) fine.setDate(0); else fine.setDate(fine.getDate() - 1);
-  const rate = Array.from({ length: n }, (_, i) => {
-    const sc = new Date(y, m + i * passo, 0);
-    const imp = tot ? (i === n - 1 ? Math.round((tot - base * (n - 1)) * 100) / 100 : base) : null;
-    return `<li><span>${n === 1 ? 'Unica soluzione' : `Rata ${i + 1}`}</span><span>entro il ${sc.toLocaleDateString('it-IT')}</span><strong>${imp !== null ? eur(imp) : ''}</strong></li>`;
-  });
-  return `<div class="anteprima"><div class="muted">Il percorso termina il <strong>${fine.toLocaleDateString('it-IT')}</strong>. Scadenze:</div><ul>${rate.join('')}</ul></div>`;
+/**
+ * Gestisce il campo "Scadenza della 1ª rata" e l'anteprima delle scadenze (calcolata dal programma).
+ * La scadenza proposta è l'ultimo giorno lavorativo del mese di inizio: finché non la modifichi a mano
+ * segue la data di inizio; se la cambi (es. il 3), tutte le rate scadono il 3 del mese.
+ */
+function gestoreAnteprima(px = '', primaIniziale = null) {
+  let auto = primaIniziale; // ultimo valore proposto automaticamente
+  let turno = 0;
+  return async (v, form) => {
+    const mio = ++turno;
+    const campo = form.elements[px + 'prima_scadenza'];
+    const box = $('#' + px + 'anteprima');
+    const dati = percorsoDaForm(v, px);
+    if (!dati.data_inizio || !dati.durata_mesi) { box.innerHTML = ''; return; }
+    const base = await api.percorsi.anteprima({ ...dati, prima_scadenza: null }).catch(() => null);
+    if (mio !== turno || !base) return;
+    // se l'utente non ha toccato la scadenza, la si aggiorna con quella predefinita
+    if (!campo.value || campo.value === auto) {
+      campo.value = base.primaPredefinita;
+      auto = base.primaPredefinita;
+    }
+    const a = campo.value === base.primaPredefinita ? base : await api.percorsi.anteprima({ ...dati, prima_scadenza: campo.value }).catch(() => null);
+    if (mio !== turno || !a) return;
+    const it = (d) => new Date(d + 'T00:00:00').toLocaleDateString('it-IT');
+    const regola = campo.value === base.primaPredefinita
+      ? 'ogni rata scade l\'ultimo giorno lavorativo del mese'
+      : `ogni rata scade il giorno ${Number(campo.value.slice(8))} del mese`;
+    box.innerHTML = `<div class="anteprima">
+      <div class="muted">Il percorso termina il <strong>${it(a.fine)}</strong>. ${a.rate.length > 1 ? `Scadenze (${regola}):` : 'Scadenza:'}
+        ${campo.value !== base.primaPredefinita ? ` <a class="link" data-reset-scadenza>usa l'ultimo giorno lavorativo</a>` : ''}</div>
+      <ul>${a.rate
+        .map((r) => `<li><span>${r.di === 1 ? 'Unica soluzione' : `Rata ${r.numero_rata}`}</span><span>entro il ${it(r.scadenza)}</span><strong>${r.importo !== null ? eur(r.importo) : ''}</strong></li>`)
+        .join('')}</ul></div>`;
+    const reset = box.querySelector('[data-reset-scadenza]');
+    if (reset) reset.onclick = () => { campo.value = ''; form.dispatchEvent(new Event('input')); };
+  };
 }
 
 const percorsoDaForm = (d, px = '') => ({
@@ -97,7 +117,8 @@ const percorsoDaForm = (d, px = '') => ({
   durata_mesi: Number(d[px + 'durata_mesi']),
   importo_totale: d[px + 'importo_totale'],
   modalita: d[px + 'modalita'],
-  numero_rate: d[px + 'modalita'] === 'rate' ? Number(d[px + 'numero_rate']) : 1
+  numero_rate: d[px + 'modalita'] === 'rate' ? Number(d[px + 'numero_rate']) : 1,
+  prima_scadenza: d[px + 'prima_scadenza'] || null
 });
 
 const oggiISO = () => new Date().toISOString().slice(0, 10);
@@ -110,7 +131,7 @@ function editPersona(cliente, persona, onDone) {
     values: persona || {
       stato: 'attivo', p_tipo: 'personal', p_data_inizio: oggiISO(), p_durata_mesi: '3', p_modalita: 'unica', p_numero_rate: '3'
     },
-    onInput: nuovo ? (v) => { $('#p_anteprima').innerHTML = anteprimaRate(v, 'p_'); } : undefined,
+    onInput: nuovo ? gestoreAnteprima('p_') : undefined,
     onSubmit: async (d) => {
       const data = Object.fromEntries(Object.entries(d).filter(([k]) => !k.startsWith('p_')));
       if (nuovo) data.percorso = percorsoDaForm(d, 'p_');
@@ -123,7 +144,15 @@ function editPersona(cliente, persona, onDone) {
 
 function editPercorso(cliente, persona, percorso, onDone, precedente) {
   let values;
-  if (percorso) values = { ...percorso, durata_mesi: String(percorso.durata_mesi), numero_rate: String(percorso.numero_rate) };
+  // scadenza della 1ª rata: quella reale del percorso; se era la predefinita continua a seguire la data di inizio
+  let primaAuto = null;
+  if (percorso) {
+    values = {
+      ...percorso, durata_mesi: String(percorso.durata_mesi), numero_rate: String(percorso.numero_rate),
+      prima_scadenza: percorso.prima_scadenza || percorso.rate?.[0]?.scadenza || ''
+    };
+    if (!percorso.prima_scadenza) primaAuto = values.prima_scadenza;
+  }
   else if (precedente) {
     // rinnovo: riparte il giorno dopo la fine del percorso precedente, con le stesse condizioni
     const f = new Date(precedente.fine + 'T00:00:00');
@@ -134,18 +163,26 @@ function editPercorso(cliente, persona, percorso, onDone, precedente) {
       data_inizio: inizio > oggiISO() ? inizio : oggiISO(), durata_mesi: String(precedente.durata_mesi),
       numero_rate: String(Math.max(precedente.numero_rate, 2)), note: ''
     };
+    // se il percorso precedente aveva un giorno di scadenza scelto, il rinnovo lo mantiene
+    if (precedente.prima_scadenza) {
+      const giorno = Number(precedente.prima_scadenza.slice(8));
+      const [yy, mm] = values.data_inizio.split('-').map(Number);
+      const ultimo = new Date(yy, mm, 0).getDate();
+      values.prima_scadenza = `${values.data_inizio.slice(0, 7)}-${String(Math.min(giorno, ultimo)).padStart(2, '0')}`;
+    }
   } else values = { tipo: 'personal', data_inizio: oggiISO(), durata_mesi: '3', modalita: 'unica', numero_rate: '3' };
   const fields = [...percorsoFields(), { name: 'note', label: 'Note', type: 'textarea' }];
   if (precedente) {
     fields[0] = { ...fields[0], label: 'Cosa rinnova' };
     fields.unshift({ name: 'info_rinnovo', type: 'html' });
   }
+  const anteprima = gestoreAnteprima('', primaAuto);
   openForm({
     title: percorso ? 'Modifica percorso' : precedente ? `Rinnovo · ${persona.nome} ${persona.cognome}` : 'Nuovo percorso',
     fields,
     values,
-    onInput: (v) => {
-      $('#anteprima').innerHTML = anteprimaRate(v);
+    onInput: (v, form) => {
+      anteprima(v, form);
       if (precedente)
         $('#info_rinnovo').innerHTML = `<div class="rinnovo-info"><span class="muted">Percorso precedente</span>
           <strong>${esc(label(TIPI_PERCORSO, precedente.tipo))}</strong> · ${precedente.durata_mesi} ${precedente.durata_mesi === 1 ? 'mese' : 'mesi'}
