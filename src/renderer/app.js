@@ -62,6 +62,17 @@ function openForm({ title, fields, values = {}, onSubmit, onInput }) {
       let input;
       if (f.type === 'heading') return `<div class="form-heading">${esc(f.label)}</div>`;
       if (f.type === 'html') return `<div class="full form-html" id="${f.name}"></div>`;
+      if (f.type === 'image')
+        return `<div class="field full"><span class="field-label">${esc(f.label)}</span>
+          <div class="image-field">
+            <div class="image-preview ${v ? '' : 'empty'}">${v ? `<img src="${esc(v)}" alt="">` : 'Nessuna immagine'}</div>
+            <div class="image-actions">
+              <label class="btn small">Scegli immagine…<input type="file" accept="image/*" data-image-for="${f.name}" hidden></label>
+              <button type="button" class="btn small ghost" data-image-clear="${f.name}" ${v ? '' : 'hidden'}>Rimuovi</button>
+              <div class="muted small">PNG, JPG o SVG. Viene ridimensionata automaticamente.</div>
+            </div>
+            <input type="hidden" name="${f.name}" value="${esc(v)}">
+          </div></div>`;
       if (f.type === 'file')
         return `<label class="${cls || 'full'}">${esc(f.label)}<input name="${f.name}" type="file" accept="${f.accept || ''}" ${req}></label>`;
       if (f.type === 'textarea') input = `<textarea name="${f.name}" ${req}>${esc(v)}</textarea>`;
@@ -101,6 +112,27 @@ function openForm({ title, fields, values = {}, onSubmit, onInput }) {
       picker.querySelectorAll('.swatch[data-color]').forEach((s) => s.classList.toggle('selected', s.dataset.color === input.value));
     picker.querySelectorAll('.swatch[data-color]').forEach((s) => (s.onclick = () => { input.value = s.dataset.color; mark(); }));
     input.addEventListener('input', mark);
+  });
+  form.querySelectorAll('[data-image-for]').forEach((input) => {
+    const name = input.dataset.imageFor;
+    const wrap = input.closest('.image-field');
+    const set = (url) => {
+      form.elements[name].value = url;
+      const prev = wrap.querySelector('.image-preview');
+      prev.classList.toggle('empty', !url);
+      prev.innerHTML = url ? `<img src="${url}" alt="">` : 'Nessuna immagine';
+      wrap.querySelector('[data-image-clear]').hidden = !url;
+    };
+    input.onchange = async () => {
+      if (!input.files[0]) return;
+      try {
+        set(await ridimensionaImmagine(input.files[0], 256));
+      } catch {
+        toast('Impossibile leggere questa immagine', true);
+      }
+      input.value = '';
+    };
+    wrap.querySelector('[data-image-clear]').onclick = () => set('');
   });
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -144,6 +176,35 @@ function openForm({ title, fields, values = {}, onSubmit, onInput }) {
   aggiorna();
   dlg.showModal();
 }
+
+// Ridimensiona un'immagine (lato massimo `max` px) e la restituisce come data URL PNG
+function ridimensionaImmagine(file, max) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const w = img.naturalWidth || max;
+      const h = img.naturalHeight || max;
+      const k = Math.min(1, max / Math.max(w, h));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(w * k));
+      c.height = Math.max(1, Math.round(h * k));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/png'));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('immagine non valida')); };
+    img.src = url;
+  });
+}
+
+// Logo del cliente, oppure le iniziali su sfondo colorato
+const logoCliente = (c, cls = '') =>
+  c.logo
+    ? `<span class="logo ${cls}"><img src="${esc(c.logo)}" alt=""></span>`
+    : `<span class="logo logo-iniziali ${cls}" style="background:${esc(c.colore)};color:${textOn(c.colore)}">${esc(
+        c.nome.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('')
+      )}</span>`;
 
 // ---------- Sidebar ---------------------------------------------------------
 let clienti = [];
@@ -192,7 +253,7 @@ function renderMenu() {
     ? list
         .map(
           (c) =>
-            `<a href="#" class="nav-item cliente-item ${route.name === 'cliente' && route.id === c.id ? 'active' : ''}" data-cliente="${c.id}" style="--cliente:${esc(c.colore)};--on-cliente:${textOn(c.colore)}"><span class="dot"></span><span class="grow">${esc(c.nome)}</span>${ritardiPerCliente[c.id] ? `<span class="count-late" title="Rate in ritardo">${ritardiPerCliente[c.id]}</span>` : ''}</a>`
+            `<a href="#" class="nav-item cliente-item ${route.name === 'cliente' && route.id === c.id ? 'active' : ''}" data-cliente="${c.id}" style="--cliente:${esc(c.colore)};--on-cliente:${textOn(c.colore)}">${logoCliente(c, 'logo-sm')}<span class="grow">${esc(c.nome)}</span>${ritardiPerCliente[c.id] ? `<span class="count-late" title="Rate in ritardo">${ritardiPerCliente[c.id]}</span>` : ''}</a>`
         )
         .join('')
     : `<div class="empty">${clienti.length ? 'Nessun risultato' : 'Nessun cliente'}</div>`;
@@ -283,6 +344,7 @@ async function renderHome() {
 // ---------- Cliente ---------------------------------------------------------
 const CLIENTE_FIELDS = [
   { name: 'nome', label: 'Nome / Ragione sociale', required: true, full: true },
+  { name: 'logo', label: 'Logo', type: 'image' },
   { name: 'email', label: 'Email', type: 'email' },
   { name: 'telefono', label: 'Telefono' },
   { name: 'partita_iva', label: 'P.IVA / Codice fiscale' },
@@ -412,9 +474,12 @@ async function renderCliente() {
 
   content.innerHTML = `
     <div class="cliente-header">
-      <div>
+      <div class="cliente-title">
+        ${logoCliente(cliente, 'logo-lg')}
+        <div>
         <h1>${esc(cliente.nome)}</h1>
         <div class="subtitle">${[cliente.email, cliente.telefono, cliente.partita_iva].filter(Boolean).map(esc).join(' · ') || '&nbsp;'}</div>
+        </div>
       </div>
       <div class="btn-row">
         <button class="btn" id="btn-edit-cliente">Modifica</button>

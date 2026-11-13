@@ -572,7 +572,7 @@ function caricaDocumento(cliente, persona, onDone) {
 
 SECTIONS.anagrafica = {
   label: 'Anagrafica clienti',
-  descrizione: 'Persone, abbonamenti, rate e ricevute',
+  descrizione: 'Persone, percorsi, rate e contabili',
   render: (cliente, el) => (route.personaId ? renderPersona(cliente, el, route.personaId) : renderElencoPersone(cliente, el))
 };
 

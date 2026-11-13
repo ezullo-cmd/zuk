@@ -85,7 +85,9 @@ const MASTER_MIGRATIONS = [
    )`,
   // v2: colore e sezioni attive nella pagina del cliente
   `ALTER TABLE clienti ADD COLUMN colore TEXT NOT NULL DEFAULT '#2f6fed';
-   ALTER TABLE clienti ADD COLUMN sezioni JSONB NOT NULL DEFAULT '["appuntamenti","fatture","acquisti"]'`
+   ALTER TABLE clienti ADD COLUMN sezioni JSONB NOT NULL DEFAULT '["appuntamenti","fatture","acquisti"]'`,
+  // v3: logo del cliente (immagine ridimensionata, salvata come data URL)
+  `ALTER TABLE clienti ADD COLUMN logo TEXT`
 ];
 
 const CLIENT_MIGRATIONS = [
@@ -252,7 +254,7 @@ async function poolForCliente(clienteId) {
 
 // ---- Clienti (DB master) ------------------------------------------------------
 
-const CLIENTE_FIELDS = ['nome', 'email', 'telefono', 'partita_iva', 'indirizzo', 'note', 'colore', 'sezioni'];
+const CLIENTE_FIELDS = ['nome', 'email', 'telefono', 'partita_iva', 'indirizzo', 'note', 'colore', 'sezioni', 'logo'];
 
 // Sezioni che si possono attivare nella pagina di un cliente
 const SEZIONI = ['anagrafica', 'appuntamenti', 'servizi', 'pagamenti', 'fatture', 'acquisti'];
@@ -261,6 +263,12 @@ function clienteValue(field, value) {
   if (field === 'colore') {
     if (!/^#[0-9a-f]{6}$/i.test(value || '')) throw new Error('Colore non valido');
     return value.toLowerCase();
+  }
+  if (field === 'logo') {
+    if (!value) return null;
+    if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(value)) throw new Error('Logo non valido');
+    if (value.length > 2_000_000) throw new Error('Logo troppo grande');
+    return value;
   }
   if (field === 'sezioni') {
     const list = (Array.isArray(value) ? value : []).filter((s) => SEZIONI.includes(s));
