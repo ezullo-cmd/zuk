@@ -104,3 +104,5 @@ button.card { cursor: pointer; }
 }
 .mt { margin-top: 14px; }
 .percorso .row.late { margin: 0 -12px; padding: 10px 12px; }
+.b-yellow { background: #ffe8a3; color: #8a5a00; font-weight: 600; }
+.row.arrivo { background: #fff8db; margin: 0 -16px; padding: 10px 16px; box-shadow: inset 4px 0 0 #f0b429; }

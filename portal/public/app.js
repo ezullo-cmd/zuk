@@ -369,14 +369,38 @@ VISTE.fatture = async () => {
   }</div>${f.length ? `<div class="totale">Totale ${eur(f.filter((x) => x.stato !== 'annullata').reduce((t, x) => t + tot(x), 0))}</div>` : ''}</div>`;
 };
 
+// ordini ai fornitori: giallo se mancano 5 giorni o meno alla consegna, rosso se in ritardo
+function statoOrdine(o) {
+  if (o.consegnato) return ['b-ok', o.data_consegna ? `Consegnato il ${data(o.data_consegna)}` : 'Consegnato', ''];
+  if (!o.consegna_prevista) return ['b-blue', 'In attesa', ''];
+  const oggi = new Date(); oggi.setHours(0, 0, 0, 0);
+  const g = Math.round((new Date(o.consegna_prevista + 'T00:00:00') - oggi) / 86400000);
+  if (g < 0) return ['b-late', `In ritardo di ${-g} ${g === -1 ? 'giorno' : 'giorni'}`, 'late'];
+  if (g <= 5) return ['b-yellow', g === 0 ? 'Arriva oggi' : g === 1 ? 'Arriva domani' : `Arriva tra ${g} giorni`, 'arrivo'];
+  return ['b-blue', `Tra ${g} giorni`, ''];
+}
+
+let filtroA = 'da_ricevere';
 VISTE.acquisti = async () => {
   const a = await api('acquisti');
-  content.innerHTML = `<h2>Acquisti</h2><div class="panel"><div class="list">${
-    a.length
-      ? a.map((x) => `<div class="row"><div class="grow"><strong>${esc(x.descrizione)}</strong><div class="muted small">${data(x.data)}${x.fornitore ? ' · ' + esc(x.fornitore) : ''}</div></div>
-          <div class="right">${eur(x.importo)}</div></div>`).join('')
-      : '<div class="muted">Nessun acquisto.</div>'
-  }</div>${a.length ? `<div class="totale">Totale ${eur(a.reduce((t, x) => t + Number(x.importo), 0))}</div>` : ''}</div>`;
+  const F = { da_ricevere: ['Da ricevere', (x) => !x.consegnato], consegnati: ['Consegnati', (x) => x.consegnato], tutti: ['Tutti', () => true] };
+  const disegna = () => {
+    const l = a.filter(F[filtroA][1]);
+    content.innerHTML = `<h2>Acquisti</h2>
+      <div class="chips">${Object.entries(F).map(([k, [t, fn]]) => `<button class="chip ${filtroA === k ? 'active' : ''}" data-a="${k}">${t} (${a.filter(fn).length})</button>`).join('')}</div>
+      <div class="panel"><div class="list">${
+        l.length
+          ? l.map((x) => {
+              const [cls, testo, riga] = statoOrdine(x);
+              return `<div class="row ${riga}"><div class="grow"><strong>${esc(x.descrizione)}</strong>
+                <div class="muted small">${x.fornitore ? esc(x.fornitore) + ' · ' : ''}ordinato il ${data(x.data)}${x.consegna_prevista ? ' · consegna prevista ' + data(x.consegna_prevista) : ''}</div></div>
+                <div class="right"><div>${eur(x.importo)}</div><span class="badge ${cls}">${testo}</span></div></div>`;
+            }).join('')
+          : '<div class="muted">Nessun ordine.</div>'
+      }</div>${l.length ? `<div class="totale">Totale ${eur(l.reduce((t, x) => t + Number(x.importo), 0))}</div>` : ''}</div>`;
+    content.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => { filtroA = b.dataset.a; disegna(); }));
+  };
+  disegna();
 };
 
 // ---------- Avvio --------------------------------------------------------------

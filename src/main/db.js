@@ -233,7 +233,12 @@ const CLIENT_MIGRATIONS = [
   // v6: ultimo tentativo di invio (gli errori si ritentano al massimo una volta l'ora)
   `ALTER TABLE promemoria ADD COLUMN ultimo_tentativo TIMESTAMPTZ`,
   // v7: scadenza della 1ª rata scelta a mano (le successive cadono lo stesso giorno del mese)
-  `ALTER TABLE percorsi ADD COLUMN prima_scadenza DATE`
+  `ALTER TABLE percorsi ADD COLUMN prima_scadenza DATE`,
+  // v8: acquisti come ordini ai fornitori, con consegna prevista e spunta "consegnato"
+  `ALTER TABLE acquisti ADD COLUMN consegna_prevista DATE;
+   ALTER TABLE acquisti ADD COLUMN consegnato BOOLEAN NOT NULL DEFAULT false;
+   ALTER TABLE acquisti ADD COLUMN data_consegna DATE;
+   UPDATE acquisti SET consegnato = true, data_consegna = data;`
 ];
 
 async function migrate(pool, migrations) {
@@ -429,7 +434,10 @@ const TABLES = {
                FROM appuntamenti a LEFT JOIN persone p ON p.id = a.persona_id`
   },
   fatture: { fields: ['numero', 'data', 'descrizione', 'imponibile', 'iva_perc', 'stato', 'note'], order: 'data DESC, id DESC' },
-  acquisti: { fields: ['data', 'fornitore', 'descrizione', 'importo', 'note'], order: 'data DESC, id DESC' },
+  acquisti: {
+    fields: ['data', 'fornitore', 'descrizione', 'importo', 'note', 'consegna_prevista', 'consegnato', 'data_consegna'],
+    order: 'consegnato, consegna_prevista NULLS LAST, data DESC, id DESC'
+  },
   persone: {
     fields: [
       'nome', 'cognome', 'data_nascita', 'sesso', 'codice_fiscale', 'telefono', 'email', 'indirizzo',
@@ -500,6 +508,7 @@ async function dashboard() {
   const clienti = await listClienti();
   const prossimi = [];
   const ritardi = [];
+  const ordini = [];
   let daIncassare = 0;
   let fattureAperte = 0;
   await Promise.all(
@@ -521,12 +530,22 @@ async function dashboard() {
         `SELECT count(*)::int AS n, coalesce(sum(imponibile * (1 + iva_perc / 100)), 0) AS tot
            FROM fatture WHERE stato = 'da_pagare'`
       );
+      // ordini non ancora consegnati: in ritardo o in arrivo entro 5 giorni
+      if ((c.sezioni || []).includes('acquisti')) {
+        const o = await pool.query(
+          `SELECT id, descrizione, fornitore, importo, data, consegna_prevista
+             FROM acquisti WHERE NOT consegnato AND consegna_prevista IS NOT NULL
+              AND consegna_prevista <= CURRENT_DATE + 5 ORDER BY consegna_prevista`
+        );
+        o.rows.forEach((r) => ordini.push({ ...r, cliente_id: c.id, cliente_nome: c.nome }));
+      }
       fattureAperte += f.rows[0].n;
       daIncassare += Number(f.rows[0].tot);
     })
   );
   prossimi.sort((a, b) => new Date(a.inizio) - new Date(b.inizio));
-  return { numClienti: clienti.length, prossimi: prossimi.slice(0, 15), fattureAperte, daIncassare, ritardi };
+  ordini.sort((a, b) => a.consegna_prevista.localeCompare(b.consegna_prevista));
+  return { numClienti: clienti.length, prossimi: prossimi.slice(0, 15), fattureAperte, daIncassare, ritardi, ordini };
 }
 
 async function testConnection(dbConfig) {

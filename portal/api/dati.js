@@ -125,7 +125,10 @@ const lettori = {
   },
 
   async acquisti(db) {
-    return (await db.query('SELECT id, data, fornitore, descrizione, importo, note FROM acquisti ORDER BY data DESC, id DESC')).rows;
+    return (await db.query(
+      `SELECT id, data, fornitore, descrizione, importo, note, consegna_prevista, consegnato, data_consegna
+         FROM acquisti ORDER BY consegnato, consegna_prevista NULLS LAST, data DESC, id DESC`
+    )).rows;
   }
 };
 

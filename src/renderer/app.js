@@ -226,18 +226,34 @@ async function loadClienti() {
 // pallino rosso sulle schede Anagrafica e Pagamenti del cliente aperto
 function badgeSchede() {
   if (route.name !== 'cliente') return;
-  const n = ritardiPerCliente[route.id];
-  content.querySelectorAll('.tab[data-tab="pagamenti"], .tab[data-tab="anagrafica"]').forEach((b) => {
-    b.querySelector('.count-late')?.remove();
-    if (n) b.insertAdjacentHTML('beforeend', ` <span class="count-late">${n}</span>`);
-  });
+  const metti = (sel, n) =>
+    content.querySelectorAll(sel).forEach((b) => {
+      b.querySelector('.count-late')?.remove();
+      if (n) b.insertAdjacentHTML('beforeend', ` <span class="count-late">${n}</span>`);
+    });
+  metti('.tab[data-tab="pagamenti"], .tab[data-tab="anagrafica"]', rateRitardoPerCliente[route.id]);
+  metti('.tab[data-tab="acquisti"]', ordiniRitardoPerCliente[route.id]);
 }
+
+let rateRitardoPerCliente = {};
+let ordiniRitardoPerCliente = {};
+const oggiLocale = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 async function aggiornaRitardi() {
   try {
     const d = await api.dashboard();
     ritardiPerCliente = {};
-    for (const r of d.ritardi) ritardiPerCliente[r.cliente_id] = (ritardiPerCliente[r.cliente_id] || 0) + r.rate.length;
+    rateRitardoPerCliente = {};
+    ordiniRitardoPerCliente = {};
+    const oggi = oggiLocale();
+    for (const r of d.ritardi) rateRitardoPerCliente[r.cliente_id] = (rateRitardoPerCliente[r.cliente_id] || 0) + r.rate.length;
+    for (const o of d.ordini || [])
+      if (o.consegna_prevista < oggi) ordiniRitardoPerCliente[o.cliente_id] = (ordiniRitardoPerCliente[o.cliente_id] || 0) + 1;
+    for (const m of [rateRitardoPerCliente, ordiniRitardoPerCliente])
+      for (const [k, n] of Object.entries(m)) ritardiPerCliente[k] = (ritardiPerCliente[k] || 0) + n;
     renderMenu();
     badgeSchede();
     return d;
@@ -336,6 +352,22 @@ async function renderHome() {
                 </div>`
               )
               .join('')}
+          </div>`
+        : ''
+    }
+    ${
+      (d.ordini || []).length
+        ? `<div class="panel ${d.ordini.some((o) => o.consegna_prevista < oggiLocale()) ? 'panel-alert' : ''}">
+            <h3>📦 Ordini da ricevere</h3>
+            <div class="list-appuntamenti">${d.ordini
+              .map((o) => {
+                const st = statoOrdine(o);
+                return `<div class="item">
+                  <div><a class="link" data-cliente="${o.cliente_id}" data-tab="acquisti"><strong>${esc(o.descrizione)}</strong></a>
+                    <span class="muted">· ${esc(o.fornitore || '')} · ${esc(o.cliente_nome)}</span></div>
+                  <div>${badgeOrdine(st)}</div></div>`;
+              })
+              .join('')}</div>
           </div>`
         : ''
     }
@@ -560,7 +592,7 @@ const SECTIONS = {
   },
   acquisti: {
     label: 'Acquisti',
-    descrizione: 'Spese e acquisti dai fornitori',
+    descrizione: 'Ordini ai fornitori, consegne e ritardi',
     singolare: 'acquisto',
     nuovo: 'Nuovo acquisto',
     vuoto: 'Nessun acquisto registrato.',
