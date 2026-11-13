@@ -29,6 +29,17 @@ CREATE USER zuk WITH PASSWORD 'una-password' CREATEDB;
 La configurazione viene salvata in `config.json` nella cartella dati dell'utente
 (Windows: `%APPDATA%\Zuk Gestionale`).
 
+### Usare Neon (Postgres online)
+
+1. Su [console.neon.tech](https://console.neon.tech) crea un progetto (regione vicina, es. *Frankfurt*).
+2. Nella dashboard premi **Connect**, **disattiva "Connection pooling"** e copia la stringa
+   `postgresql://...neon.tech/neondb?sslmode=require`.
+3. Nell'app: **Impostazioni** → incolla la stringa nel primo campo → **Prova connessione** → **Salva e connetti**.
+
+L'utente principale di Neon (`neondb_owner`) può già creare database, quindi i database
+`zuk_master` e `zuk_cliente_<id>` vengono creati automaticamente. Li vedi in Neon in *Branches → main → Databases*.
+Nel piano gratuito Neon va in pausa quando non lo usi: la prima operazione dopo una pausa può impiegare qualche secondo.
+
 ## Struttura
 
 ```

@@ -374,6 +374,9 @@ async function renderSettings() {
       <h3>Connessione PostgreSQL</h3>
       <p class="muted">Ogni cliente ha un database dedicato (<code>${esc(db.clientDbPrefix)}&lt;id&gt;</code>). L'elenco clienti è nel database <code>${esc(db.masterDb)}</code>. I database vengono creati automaticamente: l'utente deve avere il permesso <code>CREATEDB</code>.</p>
       <form id="db-form" class="form-grid">
+        <label class="full">Incolla la stringa di connessione (es. da Neon) per compilare i campi
+          <input id="conn-string" placeholder="postgresql://utente:password@host/neondb?sslmode=require">
+        </label>
         <label>Host<input name="host" value="${esc(db.host)}" required></label>
         <label>Porta<input name="port" type="number" value="${esc(db.port)}" required></label>
         <label>Utente<input name="user" value="${esc(db.user)}" required></label>
@@ -402,6 +405,23 @@ async function renderSettings() {
     masterDb: form.masterDb.value.trim(),
     clientDbPrefix: form.clientDbPrefix.value.trim(),
     ssl: form.ssl.checked
+  });
+  $('#conn-string').addEventListener('input', (e) => {
+    const raw = e.target.value.trim().replace(/^psql\s+/, '').replace(/^['"]|['"]$/g, '');
+    if (!/^postgres(ql)?:\/\//.test(raw)) return;
+    try {
+      const u = new URL(raw.replace(/^postgres(ql)?:/, 'http:'));
+      // Meglio la connessione diretta: il pooler di Neon non serve a un'app desktop
+      form.host.value = u.hostname.replace('-pooler.', '.');
+      form.port.value = u.port || 5432;
+      form.user.value = decodeURIComponent(u.username);
+      form.password.value = decodeURIComponent(u.password);
+      form.ssl.checked = u.searchParams.get('sslmode') !== 'disable' && u.hostname !== 'localhost';
+      e.target.value = '';
+      toast('Campi compilati: ora premi "Prova connessione"');
+    } catch {
+      toast('Stringa di connessione non valida', true);
+    }
   });
   $('#btn-test').onclick = async () => {
     const v = await safe(() => api.settings.test(read()));

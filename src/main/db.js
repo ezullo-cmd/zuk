@@ -19,12 +19,45 @@ const quoteIdent = (name) => {
 
 function connOpts(database, c = cfg) {
   const { host, port, user, password, ssl } = c;
-  return { host, port: Number(port), user, password, database, ssl: ssl ? { rejectUnauthorized: false } : false };
+  return {
+    host, port: Number(port), user, password, database,
+    ssl: ssl ? { rejectUnauthorized: false } : false,
+    connectionTimeoutMillis: 20000 // Neon può impiegare qualche secondo a "svegliarsi"
+  };
+}
+
+// Database "di servizio" a cui collegarsi per creare gli altri.
+// Su Neon il database di default si chiama "neondb".
+const ADMIN_DBS = ['postgres', 'neondb', 'defaultdb'];
+
+async function adminClient(c = cfg) {
+  let lastErr;
+  for (const dbName of [...new Set([...ADMIN_DBS, c.masterDb])]) {
+    const client = new Client(connOpts(dbName, c));
+    try {
+      await client.connect();
+      return client;
+    } catch (e) {
+      lastErr = e;
+      await client.end().catch(() => {});
+      // database inesistente o non accessibile: prova il successivo;
+      // altri errori (password errata, rete) li segnaliamo subito
+      if (!['3D000', '42501', '28000'].includes(e.code)) throw e;
+    }
+  }
+  throw lastErr;
+}
+
+// Le connessioni inattive possono essere chiuse dal server (es. Neon quando va in pausa):
+// senza questo handler l'errore farebbe chiudere l'app.
+function makePool(database, max) {
+  const pool = new Pool({ ...connOpts(database), max, idleTimeoutMillis: 30000, connectionTimeoutMillis: 20000 });
+  pool.on('error', (err) => console.warn(`Connessione ${database} chiusa:`, err.message));
+  return pool;
 }
 
 async function ensureDatabase(name) {
-  const admin = new Client(connOpts('postgres'));
-  await admin.connect();
+  const admin = await adminClient();
   try {
     const { rowCount } = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [name]);
     if (!rowCount) await admin.query(`CREATE DATABASE ${quoteIdent(name)}`);
@@ -120,7 +153,7 @@ async function init(dbConfig) {
   await close();
   cfg = dbConfig;
   await ensureDatabase(cfg.masterDb);
-  masterPool = new Pool(connOpts(cfg.masterDb));
+  masterPool = makePool(cfg.masterDb, 5);
   await migrate(masterPool, MASTER_MIGRATIONS);
 }
 
@@ -135,7 +168,7 @@ async function poolForCliente(clienteId) {
   if (clientPools.has(clienteId)) return clientPools.get(clienteId);
   const { rows } = await requireMaster().query('SELECT db_name FROM clienti WHERE id = $1', [clienteId]);
   if (!rows.length) throw new Error('Cliente non trovato');
-  const pool = new Pool(connOpts(rows[0].db_name));
+  const pool = makePool(rows[0].db_name, 3);
   await migrate(pool, CLIENT_MIGRATIONS); // porta il DB del cliente all'ultima versione
   clientPools.set(clienteId, pool);
   return pool;
@@ -273,8 +306,7 @@ async function dashboard() {
 }
 
 async function testConnection(dbConfig) {
-  const c = new Client(connOpts('postgres', dbConfig));
-  await c.connect();
+  const c = await adminClient(dbConfig);
   const { rows } = await c.query('SELECT version()');
   await c.end();
   return rows[0].version;
