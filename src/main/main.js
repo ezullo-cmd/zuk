@@ -1,8 +1,11 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const log = require('electron-log');
 const config = require('./config');
 const db = require('./db');
+const persone = require('./persone');
 const { setupUpdater } = require('./updater');
 
 log.initialize();
@@ -64,6 +67,23 @@ function registerIpc() {
   handle('records:create', (clienteId, table, data) => db.create(clienteId, table, data));
   handle('records:update', (clienteId, table, id, data) => db.update(clienteId, table, id, data));
   handle('records:delete', (clienteId, table, id) => db.remove(clienteId, table, id));
+
+  handle('persone:list', (clienteId) => persone.listPersone(clienteId));
+  handle('persone:get', (clienteId, id) => persone.dettaglioPersona(clienteId, id));
+  handle('persone:save', (clienteId, id, data) => persone.salvaPersona(clienteId, id, data));
+  handle('pagamenti:save', (clienteId, data, file) => persone.salvaPagamento(clienteId, data, file));
+  handle('documenti:upload', (clienteId, personaId, file, descr) => persone.caricaDocumento(clienteId, personaId, file, descr));
+  handle('documenti:delete', (clienteId, id) => persone.eliminaDocumento(clienteId, id));
+  handle('documenti:open', async (clienteId, id) => {
+    const doc = await persone.leggiDocumento(clienteId, id);
+    const dir = path.join(os.tmpdir(), 'zuk-documenti');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${clienteId}-${id}-${doc.nome_file.replace(/[^\w.\- ]+/g, '_')}`);
+    fs.writeFileSync(file, doc.dati);
+    const err = await shell.openPath(file);
+    if (err) throw new Error(err);
+    return true;
+  });
 }
 
 app.whenReady().then(async () => {

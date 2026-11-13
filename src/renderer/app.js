@@ -27,7 +27,9 @@ const textOn = (hex) => {
   const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   return 0.299 * r + 0.587 * g + 0.114 * b > 170 ? '#1d2330' : '#ffffff';
 };
-const totaleFattura =(f) => Number(f.imponibile) * (1 + Number(f.iva_perc) / 100);
+const meseLabel = (periodo) =>
+  periodo ? new Date(periodo + 'T00:00:00').toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }) : '';
+const totaleFattura = (f) => Number(f.imponibile) * (1 + Number(f.iva_perc) / 100);
 
 let toastTimer;
 function toast(msg, isError = false) {
@@ -58,6 +60,9 @@ function openForm({ title, fields, values = {}, onSubmit }) {
       const req = f.required ? 'required' : '';
       const cls = f.full || f.type === 'textarea' ? 'full' : '';
       let input;
+      if (f.type === 'heading') return `<div class="form-heading">${esc(f.label)}</div>`;
+      if (f.type === 'file')
+        return `<label class="${cls || 'full'}">${esc(f.label)}<input name="${f.name}" type="file" accept="${f.accept || ''}" ${req}></label>`;
       if (f.type === 'textarea') input = `<textarea name="${f.name}" ${req}>${esc(v)}</textarea>`;
       else if (f.type === 'select')
         input = `<select name="${f.name}" ${req}>${f.options
@@ -100,6 +105,11 @@ function openForm({ title, fields, values = {}, onSubmit }) {
     e.preventDefault();
     const data = {};
     for (const f of fields) {
+      if (f.type === 'heading') continue;
+      if (f.type === 'file') {
+        data[f.name] = form.elements[f.name].files[0] || null;
+        continue;
+      }
       if (f.type === 'multi') {
         data[f.name] = [...form.querySelectorAll(`[data-multi="${f.name}"] input:checked`)].map((i) => i.value);
         if (f.required && !data[f.name].length) return toast(`${f.label}: seleziona almeno una voce`, true);
@@ -150,7 +160,10 @@ document.addEventListener('click', (e) => {
   const r = e.target.closest('[data-route]');
   if (r) { e.preventDefault(); go({ name: r.dataset.route }); return; }
   const c = e.target.closest('[data-cliente]');
-  if (c) { e.preventDefault(); go({ name: 'cliente', id: Number(c.dataset.cliente), tab: c.dataset.tab }); }
+  if (c) {
+    e.preventDefault();
+    go({ name: 'cliente', id: Number(c.dataset.cliente), tab: c.dataset.tab, personaId: c.dataset.persona ? Number(c.dataset.persona) : undefined });
+  }
 });
 $('#search-clienti').addEventListener('input', renderMenu);
 $('#btn-new-cliente').addEventListener('click', () => editCliente());
@@ -181,9 +194,29 @@ async function renderHome() {
     <div class="cards">
       <div class="card"><div class="label">Clienti</div><div class="value">${d.numClienti}</div></div>
       <div class="card"><div class="label">Prossimi appuntamenti</div><div class="value">${d.prossimi.length}</div></div>
+      <div class="card ${d.ritardi.length ? 'card-alert' : ''}"><div class="label">Persone con rate in ritardo</div><div class="value">${d.ritardi.length}</div></div>
       <div class="card"><div class="label">Fatture da incassare</div><div class="value">${d.fattureAperte}</div></div>
       <div class="card"><div class="label">Totale da incassare</div><div class="value">${eur(d.daIncassare)}</div></div>
     </div>
+    ${
+      d.ritardi.length
+        ? `<div class="panel panel-alert">
+            <h3>⚠️ Rate in ritardo</h3>
+            <div class="list-appuntamenti">
+              ${d.ritardi
+                .map(
+                  (r) => `<div class="item">
+                    <div><a class="link" data-cliente="${r.cliente_id}" data-tab="anagrafica" data-persona="${r.persona_id}"><strong>${esc(r.persona_nome)}</strong></a>
+                      · <span class="muted">${esc(r.cliente_nome)}</span>
+                      <div class="muted">${r.rate.map((x) => meseLabel(x.periodo)).join(', ')}</div></div>
+                    <div class="late-amount">${eur(r.rate.reduce((s, x) => s + (Number(x.importo) || 0), 0))}</div>
+                  </div>`
+                )
+                .join('')}
+            </div>
+          </div>`
+        : ''
+    }
     <div class="panel">
       <h3>Prossimi appuntamenti</h3>
       <div class="list-appuntamenti">
@@ -192,7 +225,7 @@ async function renderHome() {
             ? d.prossimi
                 .map(
                   (a) => `<div class="item">
-                    <div><strong>${esc(a.titolo)}</strong> · <a class="link" data-cliente="${a.cliente_id}" data-tab="appuntamenti">${esc(a.cliente_nome)}</a>
+                    <div><strong>${esc(a.persona_nome || a.titolo || 'Appuntamento')}</strong>${a.persona_nome && a.titolo ? ` <span class="muted">${esc(a.titolo)}</span>` : ''} · <a class="link" data-cliente="${a.cliente_id}" data-tab="appuntamenti">${esc(a.cliente_nome)}</a>
                     ${a.luogo ? `<div class="muted">${esc(a.luogo)}</div>` : ''}</div>
                     <div class="muted">${fmtDateTime(a.inizio)}</div>
                   </div>`
@@ -239,11 +272,6 @@ const SEZIONI_ORDINE = ['anagrafica', 'appuntamenti', 'servizi', 'pagamenti', 'f
 
 const SECTIONS = {
   // Sezioni ancora da definire: mostrano un segnaposto finché non vengono realizzate
-  anagrafica: {
-    label: 'Anagrafica clienti',
-    descrizione: 'Elenco dei clienti di questa attività',
-    placeholder: true
-  },
   servizi: {
     label: 'Servizi',
     descrizione: 'Servizi offerti e loro durata',
@@ -370,7 +398,7 @@ async function renderCliente() {
     await loadClienti();
     go({ name: 'home' });
   };
-  content.querySelectorAll('.tab').forEach((b) => (b.onclick = () => go({ ...route, tab: b.dataset.tab })));
+  content.querySelectorAll('.tab').forEach((b) => (b.onclick = () => go({ name: 'cliente', id: route.id, tab: b.dataset.tab })));
 
   await renderSection(cliente, tab);
 }
@@ -378,6 +406,7 @@ async function renderCliente() {
 async function renderSection(cliente, table) {
   const s = SECTIONS[table];
   const el = $('#section');
+  if (s.render) return s.render(cliente, el);
   if (s.placeholder) {
     el.innerHTML = `<div class="panel placeholder">
       <h3>${esc(s.label)}</h3>
@@ -555,9 +584,9 @@ api.updater.onEvent((ev) => {
 });
 
 // ---------- Avvio -----------------------------------------------------------
-(async () => {
+window.addEventListener('DOMContentLoaded', async () => {
   const info = await api.appInfo();
   $('#app-version').textContent = info.version;
   await loadClienti();
   go({ name: info.dbReady ? 'home' : 'settings' });
-})();
+});

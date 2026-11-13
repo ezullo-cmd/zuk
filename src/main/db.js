@@ -117,7 +117,61 @@ const CLIENT_MIGRATIONS = [
      importo     NUMERIC(12,2) NOT NULL DEFAULT 0,
      note        TEXT,
      creato_il   TIMESTAMPTZ NOT NULL DEFAULT now()
-   )`
+   )`,
+  // v2: anagrafica delle persone (clienti dell'attività), rate, documenti; appuntamenti collegati alla persona
+  `CREATE TABLE persone (
+     id                   SERIAL PRIMARY KEY,
+     nome                 TEXT NOT NULL,
+     cognome              TEXT NOT NULL,
+     data_nascita         DATE,
+     sesso                TEXT,
+     codice_fiscale       TEXT,
+     telefono             TEXT,
+     email                TEXT,
+     indirizzo            TEXT,
+     contatto_emergenza   TEXT,
+     obiettivo            TEXT,
+     livello              TEXT,
+     condizioni_salute    TEXT,
+     certificato_scadenza DATE,
+     altezza_cm           NUMERIC(5,1),
+     peso_kg              NUMERIC(5,1),
+     stato                TEXT NOT NULL DEFAULT 'attivo',
+     data_inizio          DATE NOT NULL DEFAULT CURRENT_DATE,
+     data_fine            DATE,
+     tipo_pagamento       TEXT NOT NULL DEFAULT 'mensile',
+     importo              NUMERIC(10,2),
+     metodo_pagamento     TEXT,
+     note                 TEXT,
+     creato_il            TIMESTAMPTZ NOT NULL DEFAULT now()
+   );
+   CREATE TABLE documenti (
+     id          SERIAL PRIMARY KEY,
+     persona_id  INT REFERENCES persone(id) ON DELETE CASCADE,
+     nome_file   TEXT NOT NULL,
+     mime        TEXT NOT NULL,
+     dimensione  INT NOT NULL,
+     dati        BYTEA NOT NULL,
+     descrizione TEXT,
+     caricato_il TIMESTAMPTZ NOT NULL DEFAULT now()
+   );
+   CREATE TABLE pagamenti (
+     id           SERIAL PRIMARY KEY,
+     persona_id   INT NOT NULL REFERENCES persone(id) ON DELETE CASCADE,
+     periodo      DATE,
+     importo      NUMERIC(10,2),
+     pagato_il    DATE NOT NULL DEFAULT CURRENT_DATE,
+     metodo       TEXT,
+     esente       BOOLEAN NOT NULL DEFAULT false,
+     documento_id INT REFERENCES documenti(id) ON DELETE SET NULL,
+     note         TEXT,
+     creato_il    TIMESTAMPTZ NOT NULL DEFAULT now(),
+     UNIQUE (persona_id, periodo)
+   );
+   ALTER TABLE appuntamenti ADD COLUMN persona_id INT REFERENCES persone(id) ON DELETE SET NULL;
+   ALTER TABLE appuntamenti ADD COLUMN stato TEXT NOT NULL DEFAULT 'programmato';
+   ALTER TABLE appuntamenti ALTER COLUMN titolo DROP NOT NULL;
+   CREATE INDEX appuntamenti_persona_idx ON appuntamenti (persona_id, inizio);`
 ];
 
 async function migrate(pool, migrations) {
@@ -249,9 +303,27 @@ async function setArchiviato(id, archiviato) {
 // ---- Dati del cliente (DB dedicato) -------------------------------------------
 
 const TABLES = {
-  appuntamenti: { fields: ['titolo', 'inizio', 'fine', 'luogo', 'note'], order: 'inizio DESC' },
+  appuntamenti: {
+    fields: ['persona_id', 'titolo', 'inizio', 'fine', 'luogo', 'stato', 'note'],
+    order: 'inizio DESC',
+    select: `SELECT a.*, p.nome || ' ' || p.cognome AS persona_nome
+               FROM appuntamenti a LEFT JOIN persone p ON p.id = a.persona_id`
+  },
   fatture: { fields: ['numero', 'data', 'descrizione', 'imponibile', 'iva_perc', 'stato', 'note'], order: 'data DESC, id DESC' },
-  acquisti: { fields: ['data', 'fornitore', 'descrizione', 'importo', 'note'], order: 'data DESC, id DESC' }
+  acquisti: { fields: ['data', 'fornitore', 'descrizione', 'importo', 'note'], order: 'data DESC, id DESC' },
+  persone: {
+    fields: [
+      'nome', 'cognome', 'data_nascita', 'sesso', 'codice_fiscale', 'telefono', 'email', 'indirizzo',
+      'contatto_emergenza', 'obiettivo', 'livello', 'condizioni_salute', 'certificato_scadenza',
+      'altezza_cm', 'peso_kg', 'stato', 'data_inizio', 'data_fine', 'tipo_pagamento', 'importo',
+      'metodo_pagamento', 'note'
+    ],
+    order: 'cognome, nome'
+  },
+  pagamenti: {
+    fields: ['persona_id', 'periodo', 'importo', 'pagato_il', 'metodo', 'esente', 'documento_id', 'note'],
+    order: 'periodo DESC NULLS LAST, pagato_il DESC'
+  }
 };
 
 function table(name) {
@@ -265,7 +337,7 @@ const clean = (v) => (v === '' ? null : v);
 async function list(clienteId, name) {
   const t = table(name);
   const pool = await poolForCliente(clienteId);
-  const { rows } = await pool.query(`SELECT * FROM ${name} ORDER BY ${t.order}`);
+  const { rows } = await pool.query(`${t.select || `SELECT * FROM ${name}`} ORDER BY ${t.order}`);
   return rows;
 }
 
@@ -304,25 +376,34 @@ async function remove(clienteId, name, id) {
 async function dashboard() {
   const clienti = await listClienti();
   const prossimi = [];
+  const ritardi = [];
   let daIncassare = 0;
   let fattureAperte = 0;
   await Promise.all(
     clienti.map(async (c) => {
       const pool = await poolForCliente(c.id);
       const app = await pool.query(
-        `SELECT * FROM appuntamenti WHERE inizio >= now() - interval '1 hour' ORDER BY inizio LIMIT 10`
+        `${TABLES.appuntamenti.select}
+          WHERE a.inizio >= now() - interval '1 hour' AND a.stato = 'programmato' ORDER BY a.inizio LIMIT 10`
       );
-      app.rows.forEach((r) => prossimi.push({ ...r, cliente_id: c.id, cliente_nome: c.nome }));
+      app.rows.forEach((r) => prossimi.push({ ...r, cliente_id: c.id, cliente_nome: c.nome, cliente_colore: c.colore }));
+      const persone = await require('./persone').listPersone(c.id);
+      persone
+        .filter((p) => p.situazione.inRitardo.length)
+        .forEach((p) => ritardi.push({
+          cliente_id: c.id, cliente_nome: c.nome, cliente_colore: c.colore,
+          persona_id: p.id, persona_nome: `${p.nome} ${p.cognome}`, rate: p.situazione.inRitardo
+        }));
       const f = await pool.query(
         `SELECT count(*)::int AS n, coalesce(sum(imponibile * (1 + iva_perc / 100)), 0) AS tot
-           FROM fatture WHERE stato <> 'pagata'`
+           FROM fatture WHERE stato = 'da_pagare'`
       );
       fattureAperte += f.rows[0].n;
       daIncassare += Number(f.rows[0].tot);
     })
   );
   prossimi.sort((a, b) => new Date(a.inizio) - new Date(b.inizio));
-  return { numClienti: clienti.length, prossimi: prossimi.slice(0, 15), fattureAperte, daIncassare };
+  return { numClienti: clienti.length, prossimi: prossimi.slice(0, 15), fattureAperte, daIncassare, ritardi };
 }
 
 async function testConnection(dbConfig) {
@@ -335,5 +416,5 @@ async function testConnection(dbConfig) {
 module.exports = {
   init, close, isReady, testConnection,
   listClienti, getCliente, createCliente, updateCliente, setArchiviato,
-  list, create, update, remove, dashboard
+  list, create, update, remove, dashboard, poolForCliente
 };

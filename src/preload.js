@@ -27,6 +27,19 @@ contextBridge.exposeInMainWorld('api', {
     update: (clienteId, table, id, data) => call('records:update', clienteId, table, id, data),
     remove: (clienteId, table, id) => call('records:delete', clienteId, table, id)
   },
+  persone: {
+    list: (clienteId) => call('persone:list', clienteId),
+    get: (clienteId, id) => call('persone:get', clienteId, id),
+    save: (clienteId, id, data) => call('persone:save', clienteId, id, data)
+  },
+  pagamenti: {
+    save: (clienteId, data, file) => call('pagamenti:save', clienteId, data, file)
+  },
+  documenti: {
+    upload: (clienteId, personaId, file, descr) => call('documenti:upload', clienteId, personaId, file, descr),
+    open: (clienteId, id) => call('documenti:open', clienteId, id),
+    remove: (clienteId, id) => call('documenti:delete', clienteId, id)
+  },
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),
     download: () => ipcRenderer.invoke('updater:download'),
