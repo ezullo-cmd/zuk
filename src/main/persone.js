@@ -195,17 +195,65 @@ function normalizzaTipo(tipo) {
 /** Tipi scritti a mano per questo cliente (da mostrare tra quelli selezionabili). */
 async function tipiPercorso(clienteId) {
   const pool = await db.poolForCliente(clienteId);
-  const { rows } = await pool.query(
-    `SELECT nome FROM tipi_percorso
-      UNION SELECT DISTINCT tipo FROM percorsi WHERE NOT (tipo = ANY($1))
-      ORDER BY 1`, [TIPI_PERCORSO]
-  );
+  const { rows } = await pool.query('SELECT nome FROM tipi_percorso WHERE NOT nascosto ORDER BY lower(nome)');
   return rows.map((r) => r.nome);
 }
 
+/** Tipi scritti a mano con il numero di percorsi che li usano (per la gestione). */
+async function elencoTipiPercorso(clienteId) {
+  const pool = await db.poolForCliente(clienteId);
+  const { rows } = await pool.query(
+    `SELECT t.nome, t.nascosto, count(p.id)::int AS percorsi
+       FROM tipi_percorso t LEFT JOIN percorsi p ON p.tipo = t.nome
+      GROUP BY t.id ORDER BY t.nascosto, lower(t.nome)`
+  );
+  return rows;
+}
+
+async function aggiungiTipoPercorso(clienteId, nome) {
+  const t = normalizzaTipo(nome);
+  if (TIPI_PERCORSO.includes(t)) throw new Error('Questo tipo esiste già tra quelli di base');
+  const pool = await db.poolForCliente(clienteId);
+  await pool.query(
+    'INSERT INTO tipi_percorso (nome) VALUES ($1) ON CONFLICT (nome) DO UPDATE SET nascosto = false', [t]
+  );
+  return true;
+}
+
+/** Rinomina un tipo e aggiorna i percorsi che lo usano (se il nuovo nome esiste già, i due si uniscono). */
+async function rinominaTipoPercorso(clienteId, vecchio, nuovo) {
+  const t = normalizzaTipo(nuovo);
+  if (t === vecchio) return true;
+  const pool = await db.poolForCliente(clienteId);
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query('UPDATE percorsi SET tipo = $2 WHERE tipo = $1', [vecchio, t]);
+    await c.query('DELETE FROM tipi_percorso WHERE nome = $1', [vecchio]);
+    if (!TIPI_PERCORSO.includes(t))
+      await c.query('INSERT INTO tipi_percorso (nome) VALUES ($1) ON CONFLICT (nome) DO UPDATE SET nascosto = false', [t]);
+    await c.query('COMMIT');
+  } catch (e) {
+    await c.query('ROLLBACK');
+    throw e;
+  } finally {
+    c.release();
+  }
+  return true;
+}
+
+/** Elimina un tipo: se è usato da percorsi esistenti resta su quelli ma non è più selezionabile. */
 async function rimuoviTipoPercorso(clienteId, nome) {
   const pool = await db.poolForCliente(clienteId);
-  await pool.query('DELETE FROM tipi_percorso WHERE nome = $1', [nome]);
+  const { rows: [u] } = await pool.query('SELECT count(*)::int AS n FROM percorsi WHERE tipo = $1', [nome]);
+  if (u.n) await pool.query('UPDATE tipi_percorso SET nascosto = true WHERE nome = $1', [nome]);
+  else await pool.query('DELETE FROM tipi_percorso WHERE nome = $1', [nome]);
+  return { nascosto: u.n > 0, percorsi: u.n };
+}
+
+async function ripristinaTipoPercorso(clienteId, nome) {
+  const pool = await db.poolForCliente(clienteId);
+  await pool.query('UPDATE tipi_percorso SET nascosto = false WHERE nome = $1', [nome]);
   return true;
 }
 
@@ -247,13 +295,14 @@ async function salvaPercorso(clienteId, id, data) {
   // un tipo nuovo scritto a mano diventa selezionabile dalla volta successiva
   if (!TIPI_PERCORSO.includes(d.tipo)) {
     const pool = await db.poolForCliente(clienteId);
-    await pool.query('INSERT INTO tipi_percorso (nome) VALUES ($1) ON CONFLICT (nome) DO NOTHING', [d.tipo]);
+    // scriverlo di nuovo a mano lo rende di nuovo selezionabile, se era stato eliminato
+    await pool.query('INSERT INTO tipi_percorso (nome) VALUES ($1) ON CONFLICT (nome) DO UPDATE SET nascosto = false', [d.tipo]);
   }
   return id ? db.update(clienteId, 'percorsi', id, d) : db.create(clienteId, 'percorsi', d);
 }
 
 module.exports = {
-  tipiPercorso, rimuoviTipoPercorso,
+  tipiPercorso, elencoTipiPercorso, aggiungiTipoPercorso, rinominaTipoPercorso, rimuoviTipoPercorso, ripristinaTipoPercorso,
   FREQUENZE, periodiAttesi, situazioneRate, statisticheAppuntamenti,
   finePercorso, pianoRate, situazionePercorso, anteprimaPercorso, primaScadenzaPredefinita,
   listPersone, listRate, dettaglioPersona, salvaPersona, salvaPercorso, salvaPagamento,

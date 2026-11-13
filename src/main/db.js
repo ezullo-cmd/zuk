@@ -244,7 +244,13 @@ const CLIENT_MIGRATIONS = [
      id        SERIAL PRIMARY KEY,
      nome      TEXT NOT NULL UNIQUE,
      creato_il TIMESTAMPTZ NOT NULL DEFAULT now()
-   )`
+   )`,
+  // v10: tipi eliminati ma ancora usati da percorsi esistenti (non più selezionabili)
+  `ALTER TABLE tipi_percorso ADD COLUMN nascosto BOOLEAN NOT NULL DEFAULT false;
+   INSERT INTO tipi_percorso (nome)
+     SELECT DISTINCT tipo FROM percorsi
+      WHERE tipo NOT IN ('nutrizione','personal','personal_nutrizione','trattamento','ristrutturazione_edile')
+     ON CONFLICT (nome) DO NOTHING;`
 ];
 
 async function migrate(pool, migrations) {

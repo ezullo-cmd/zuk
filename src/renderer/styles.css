@@ -260,3 +260,16 @@ tr.row-done td { color: var(--muted); }
 .card-yellow .value { color: #8a5a00; }
 .check-consegna { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text); font-size: 13px; flex-direction: row; }
 .check-consegna input { width: 18px; height: 18px; cursor: pointer; }
+
+/* ---- Tipi di percorso ---- */
+#tipi-dialog { width: 560px; }
+.tipi-titolo { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.tipi-base { display: flex; flex-wrap: wrap; gap: 6px; }
+.tipo-riga { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-top: 1px solid var(--border); }
+.tipo-riga:first-child { border-top: none; }
+.tipo-riga .grow { flex: 1; display: flex; flex-direction: column; }
+.tipo-riga.nascosto .grow { color: var(--muted); }
+.tipo-nuovo { display: flex; gap: 8px; margin-top: 16px; }
+.tipo-nuovo input { flex: 1; }
+.tipo-riga .rinomina { margin: 0; flex: 1; }
+.tipo-riga:has(.rinomina) { flex-direction: column; align-items: stretch; }

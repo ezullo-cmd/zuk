@@ -152,6 +152,10 @@ function registerIpc() {
   handle('percorsi:anteprima', (data) => persone.anteprimaPercorso(data));
   handle('percorsi:tipi', (clienteId) => persone.tipiPercorso(clienteId));
   handle('percorsi:rimuoviTipo', (clienteId, nome) => persone.rimuoviTipoPercorso(clienteId, nome));
+  handle('percorsi:elencoTipi', (clienteId) => persone.elencoTipiPercorso(clienteId));
+  handle('percorsi:aggiungiTipo', (clienteId, nome) => persone.aggiungiTipoPercorso(clienteId, nome));
+  handle('percorsi:rinominaTipo', (clienteId, vecchio, nuovo) => persone.rinominaTipoPercorso(clienteId, vecchio, nuovo));
+  handle('percorsi:ripristinaTipo', (clienteId, nome) => persone.ripristinaTipoPercorso(clienteId, nome));
   handle('percorsi:save', (clienteId, id, data) => persone.salvaPercorso(clienteId, id, data));
   handle('pagamenti:save', (clienteId, data, file) => persone.salvaPagamento(clienteId, data, file));
   handle('documenti:upload', (clienteId, personaId, file, descr) => persone.caricaDocumento(clienteId, personaId, file, descr));

@@ -221,6 +221,89 @@ function badgePercorso(pa, sit) {
   return `${esc(nomeTipo(pa.tipo))}${rinnovi}<div class="muted small">fino al ${fmtDate(pa.fine)}${extra}</div>`;
 }
 
+// ---------- Gestione dei tipi di percorso -------------------------------------
+async function gestisciTipi(cliente, onClose) {
+  const dlg = $('#tipi-dialog') || document.body.appendChild(Object.assign(document.createElement('dialog'), { id: 'tipi-dialog' }));
+  dlg.onclose = () => onClose && onClose();
+
+  const disegna = async () => {
+    const tipi = await safe(() => api.percorsi.elencoTipi(cliente.id));
+    const attivi = tipi.filter((t) => !t.nascosto);
+    const nascosti = tipi.filter((t) => t.nascosto);
+    const uso = (n) => (n ? `<span class="muted small">usato in ${n} ${n === 1 ? 'percorso' : 'percorsi'}</span>` : '<span class="muted small">non ancora usato</span>');
+    dlg.innerHTML = `
+      <h2>Tipi di percorso · ${esc(cliente.nome)}</h2>
+      <h4 class="tipi-titolo">Di base (sempre disponibili)</h4>
+      <div class="tipi-base">${TIPI_PERCORSO.map(([, n]) => `<span class="badge annullata">${esc(n)}</span>`).join(' ')}</div>
+      <h4 class="tipi-titolo">Aggiunti per questo cliente</h4>
+      <div class="tipi-lista">${
+        attivi.length
+          ? attivi.map((t) => `<div class="tipo-riga">
+              <div class="grow"><strong>${esc(t.nome)}</strong> ${uso(t.percorsi)}</div>
+              <button class="btn small" data-rinomina="${esc(t.nome)}">Rinomina</button>
+              <button class="btn small danger" data-elimina="${esc(t.nome)}">Elimina</button></div>`).join('')
+          : '<div class="muted">Nessun tipo aggiunto.</div>'
+      }</div>
+      ${nascosti.length ? `<h4 class="tipi-titolo">Eliminati (restano solo sui percorsi già creati)</h4>
+        <div class="tipi-lista">${nascosti.map((t) => `<div class="tipo-riga nascosto">
+          <div class="grow">${esc(t.nome)} ${uso(t.percorsi)}</div>
+          <button class="btn small" data-ripristina="${esc(t.nome)}">Ripristina</button></div>`).join('')}</div>` : ''}
+      <form id="tipo-nuovo" class="tipo-nuovo">
+        <input name="nome" placeholder="Nuovo tipo, es. Pilates" maxlength="60" required>
+        <button class="btn primary" type="submit">＋ Aggiungi</button>
+      </form>
+      <div class="modal-actions"><button class="btn" id="tipi-chiudi">Chiudi</button></div>`;
+
+    $('#tipi-chiudi').onclick = () => dlg.close();
+    $('#tipo-nuovo').onsubmit = async (e) => {
+      e.preventDefault();
+      await safe(() => api.percorsi.aggiungiTipo(cliente.id, e.target.nome.value));
+      toast('Tipo aggiunto');
+      disegna();
+    };
+    dlg.querySelectorAll('[data-rinomina]').forEach((b) => (b.onclick = () => {
+      const vecchio = b.dataset.rinomina;
+      const riga = b.closest('.tipo-riga');
+      riga.innerHTML = `<form class="tipo-nuovo rinomina">
+          <input name="nome" value="${esc(vecchio)}" maxlength="60" required>
+          <button class="btn small primary" type="submit">Salva</button>
+          <button class="btn small" type="button" data-annulla>Annulla</button>
+        </form>
+        <div class="muted small">Il nuovo nome vale anche per i percorsi che usano già “${esc(vecchio)}”.</div>`;
+      const f = riga.querySelector('form');
+      f.nome.focus();
+      f.nome.select();
+      riga.querySelector('[data-annulla]').onclick = () => disegna();
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        const nuovo = f.nome.value.trim();
+        if (nuovo && nuovo !== vecchio) {
+          await safe(() => api.percorsi.rinominaTipo(cliente.id, vecchio, nuovo));
+          toast('Tipo rinominato');
+        }
+        disegna();
+      };
+    }));
+    dlg.querySelectorAll('[data-elimina]').forEach((b) => (b.onclick = async () => {
+      const t = tipi.find((x) => x.nome === b.dataset.elimina);
+      const msg = t.percorsi
+        ? `"${t.nome}" è usato in ${t.percorsi} ${t.percorsi === 1 ? 'percorso' : 'percorsi'}: resterà su quelli, ma non sarà più selezionabile. Continuare?`
+        : `Eliminare il tipo "${t.nome}"?`;
+      if (!confirm(msg)) return;
+      await safe(() => api.percorsi.rimuoviTipo(cliente.id, t.nome));
+      toast('Tipo eliminato');
+      disegna();
+    }));
+    dlg.querySelectorAll('[data-ripristina]').forEach((b) => (b.onclick = async () => {
+      await safe(() => api.percorsi.ripristinaTipo(cliente.id, b.dataset.ripristina));
+      toast('Tipo di nuovo selezionabile');
+      disegna();
+    }));
+  };
+  await disegna();
+  if (!dlg.open) dlg.showModal();
+}
+
 /** Etichetta del periodo coperto da una rata: "novembre 2026" o "ottobre – dicembre 2026". */
 function periodoLabel(r) {
   if (r.etichetta) return r.etichetta;
@@ -286,6 +369,7 @@ async function renderElencoPersone(cliente, el) {
     <div class="toolbar">
       <input id="f-persone" class="search-input" placeholder="Cerca per nome, telefono, email…" value="${esc(filtroPersone.testo)}">
       <div class="spacer"></div>
+      <button class="btn" id="btn-tipi-percorso">⚙ Tipi di percorso</button>
       <button class="btn primary" id="btn-add-persona">＋ Nuova persona</button>
     </div>
     <div class="table-wrap"><table class="clickable">
@@ -322,6 +406,7 @@ async function renderElencoPersone(cliente, el) {
   };
   el.querySelectorAll('[data-vista]').forEach((b) => (b.onclick = () => { filtroPersone.vista = b.dataset.vista; refresh(); }));
   $('#btn-add-persona').onclick = () => editPersona(cliente, null, (p) => apriPersona(p.id));
+  $('#btn-tipi-percorso').onclick = () => gestisciTipi(cliente, refresh);
   el.querySelectorAll('[data-persona-row]').forEach((tr) => (tr.onclick = () => apriPersona(Number(tr.dataset.personaRow))));
 }
 
@@ -491,13 +576,19 @@ async function renderPersona(cliente, el, personaId) {
     (b) =>
       (b.onclick = async () => {
         const r = rateFlat[Number(b.dataset.rataEsente)];
-        const motivo = prompt(`Segnare ${periodoLabel(r)} come non dovuta? Motivo (facoltativo):`, 'Sospensione');
-        if (motivo === null) return;
-        await safe(() => api.pagamenti.save(cliente.id, {
-          persona_id: p.id, periodo: r.periodo, percorso_id: r.percorso_id, numero_rata: r.numero_rata, esente: true, importo: 0, note: motivo
-        }));
-        aggiornaRitardi();
-        refresh();
+        openForm({
+          title: `Segna come non dovuta · ${periodoLabel(r)}`,
+          fields: [{ name: 'motivo', label: 'Motivo (facoltativo), es. sospensione, vacanza', full: true }],
+          values: { motivo: 'Sospensione' },
+          onSubmit: async ({ motivo }) => {
+            await api.pagamenti.save(cliente.id, {
+              persona_id: p.id, periodo: r.periodo, percorso_id: r.percorso_id, numero_rata: r.numero_rata, esente: true, importo: 0, note: motivo
+            });
+            toast('Rata segnata come non dovuta');
+            aggiornaRitardi();
+            refresh();
+          }
+        });
       })
   );
   el.querySelectorAll('[data-rata-edit]').forEach(
