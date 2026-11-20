@@ -1,11 +1,17 @@
 // Aggiornamenti automatici tramite GitHub Releases (electron-updater).
 // All'avvio controlla se esiste una nuova versione: se sì mostra una notifica di sistema
 // e un banner nell'app; l'utente sceglie se scaricarla e poi riavviare per installarla.
-const { app, ipcMain, Notification } = require('electron');
+const { app, ipcMain, Notification, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
 
 const CHECK_EVERY_MS = 30 * 60 * 1000;
+
+// Su Mac senza certificato Apple macOS non accetta l'installazione automatica:
+// si avvisa della nuova versione e si apre la pagina da cui scaricarla.
+const MANUALE = process.platform === 'darwin';
+const { owner, repo } = require('../../package.json').build.publish[0];
+const paginaVersione = (v) => `https://github.com/${owner}/${repo}/releases/tag/v${v}`;
 
 function setupUpdater(getWindow) {
   autoUpdater.logger = log;
@@ -30,8 +36,10 @@ function setupUpdater(getWindow) {
   autoUpdater.on('checking-for-update', () => send('checking'));
   autoUpdater.on('update-not-available', () => send('not-available'));
   autoUpdater.on('update-available', (info) => {
-    send('available', { version: info.version, releaseNotes: info.releaseNotes });
-    notify('Nuova versione disponibile', `Zuk Gestionale ${info.version} è pronta per essere installata.`);
+    send('available', { version: info.version, releaseNotes: info.releaseNotes, manuale: MANUALE });
+    notify('Nuova versione disponibile', MANUALE
+      ? `Zuk Gestionale ${info.version}: scarica il nuovo installer dalla pagina che si apre con "Scarica".`
+      : `Zuk Gestionale ${info.version} è pronta per essere installata.`);
   });
   autoUpdater.on('download-progress', (p) => send('progress', { percent: Math.round(p.percent) }));
   autoUpdater.on('update-downloaded', (info) => {
@@ -44,6 +52,7 @@ function setupUpdater(getWindow) {
   ipcMain.handle('updater:download', async () => {
     await autoUpdater.downloadUpdate().catch((e) => send('error', { message: e.message }));
   });
+  ipcMain.handle('updater:pagina', (_e, versione) => shell.openExternal(paginaVersione(versione)));
   ipcMain.handle('updater:install', () => setImmediate(() => autoUpdater.quitAndInstall(false, true)));
 
   function check() {

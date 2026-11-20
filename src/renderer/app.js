@@ -943,6 +943,13 @@ function showBanner(html) {
 api.updater.onEvent((ev) => {
   switch (ev.type) {
     case 'available':
+      if (ev.manuale) {
+        // Mac: si scarica il nuovo .dmg e lo si trascina in Applicazioni (sostituisce la versione attuale)
+        showBanner(`<div>Nuova versione <strong>${esc(ev.version)}</strong> disponibile<div class="muted small">Scarica il .dmg e trascina l'app in Applicazioni</div></div>
+          <button class="btn small" id="upd-pagina">Scarica</button>`);
+        $('#upd-pagina').onclick = () => api.updater.pagina(ev.version);
+        break;
+      }
       showBanner(`<div>Nuova versione <strong>${esc(ev.version)}</strong> disponibile</div><button class="btn small" id="upd-download">Aggiorna</button>`);
       $('#upd-download').onclick = () => {
         showBanner('<div>Download in corso…</div><div class="progress"><div style="width:0%"></div></div>');

@@ -41,8 +41,8 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        # Per macOS aggiungi "macos-latest": l'aggiornamento automatico su Mac richiede la firma del codice.
-        os: [windows-latest, ubuntu-latest]
+        # Mac: firma ad-hoc (senza account Apple). L'app avvisa delle nuove versioni e apre la pagina di download.
+        os: [windows-latest, ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -60,6 +60,7 @@ jobs:
       - name: Build e upload sulla release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npx electron-builder --publish always
 
   publish:
