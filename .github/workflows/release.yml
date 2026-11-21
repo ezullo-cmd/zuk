@@ -1,5 +1,5 @@
 # Ad ogni push su "main" viene creata una nuova versione dell'app (1.0.<numero build>),
-# compilata per Windows/Linux e pubblicata come GitHub Release.
+# provata (l'app pacchettizzata deve avviarsi), compilata per Windows/Mac/Linux e pubblicata come GitHub Release.
 # L'app installata la rileva all'avvio e propone l'aggiornamento automatico.
 name: Build & Release
 
@@ -21,7 +21,26 @@ env:
   VERSION: 1.0.${{ github.run_number }}
 
 jobs:
+  # Prima di pubblicare: l'app pacchettizzata deve avviarsi davvero
+  prova-avvio:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Crea l'app pacchettizzata
+        run: npx electron-builder --linux --dir --publish never
+      - name: Avvia l'app pacchettizzata
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb > /dev/null
+          ZUK_PROVA_AVVIO=1 timeout 90 xvfb-run -a dist/linux-unpacked/zuk-gestionale --no-sandbox 2>&1 | tee avvio.log || true
+          grep -q PROVA_AVVIO_OK avvio.log || { echo "L'app non si avvia: pubblicazione bloccata"; exit 1; }
+
   create-release:
+    needs: prova-avvio
     runs-on: ubuntu-latest
     steps:
       - name: Crea release in bozza

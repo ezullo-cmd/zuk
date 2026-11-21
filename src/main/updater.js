@@ -10,7 +10,9 @@ const CHECK_EVERY_MS = 30 * 60 * 1000;
 // Su Mac senza certificato Apple macOS non accetta l'installazione automatica:
 // si avvisa della nuova versione e si apre la pagina da cui scaricarla.
 const MANUALE = process.platform === 'darwin';
-const { owner, repo } = require('../../package.json').build.publish[0];
+// Nota: nell'app pacchettizzata package.json non contiene la sezione "build": il repository va scritto qui
+const REPO_RILASCI = { owner: 'ezullo-cmd', repo: 'zuk' };
+const { owner, repo } = REPO_RILASCI;
 const paginaVersione = (v) => `https://github.com/${owner}/${repo}/releases/tag/v${v}`;
 
 function setupUpdater(getWindow) {

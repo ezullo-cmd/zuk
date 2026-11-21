@@ -18,7 +18,18 @@ promemoria.configura({
   whatsapp,
   orario: () => config.load().orarioPromemoria
 });
-const { setupUpdater } = require('./updater');
+if (process.env.ZUK_PROVA_AVVIO) {
+  // nella prova di avvio qualsiasi errore deve far fallire la pubblicazione (niente finestre di dialogo)
+  process.on('uncaughtException', (e) => { console.error('PROVA_AVVIO_ERRORE', e); app.exit(1); });
+}
+
+// un problema negli aggiornamenti non deve mai impedire l'avvio dell'app
+let setupUpdater = () => {};
+try {
+  ({ setupUpdater } = require('./updater'));
+} catch (e) {
+  log.error('Modulo aggiornamenti non disponibile:', e);
+}
 
 log.initialize();
 let mainWindow = null;
@@ -40,6 +51,13 @@ function createWindow() {
   });
   mainWindow.removeMenu();
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  // prova di avvio usata dalla pubblicazione automatica: se la pagina si carica, l'app è a posto
+  if (process.env.ZUK_PROVA_AVVIO) {
+    mainWindow.webContents.once('did-finish-load', () => setTimeout(() => {
+      console.log('PROVA_AVVIO_OK');
+      app.exit(0);
+    }, 3000));
+  }
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
@@ -209,7 +227,11 @@ app.whenReady().then(async () => {
     log.warn('Connessione DB non riuscita all\'avvio:', err.message);
   }
   createWindow();
-  setupUpdater(() => mainWindow);
+  try {
+    setupUpdater(() => mainWindow);
+  } catch (e) {
+    log.error('Avvio aggiornamenti non riuscito:', e);
+  }
   setTimeout(controllaPromemoria, 15000);
   setInterval(controllaPromemoria, 5 * 60 * 1000);
 
